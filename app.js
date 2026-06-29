@@ -1,3 +1,4 @@
+// v2.0 - Fix: renamed supabase var to _db to avoid CDN conflict
 // ============================================================
 // GARMIN FITNESS TRACKER - app.js
 // Supabase URL: https://snmqnbxmjiivjyeevugd.supabase.co
