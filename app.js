@@ -6,7 +6,7 @@
 const SUPABASE_URL = 'https://snmqnbxmjiivjyeevugd.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNubXFuYnhtamlpdmp5ZWV2dWdkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI2OTI0MDcsImV4cCI6MjA5ODI2ODQwN30.mktcJueyphNdvnpxc6fNf8zYMJJqkpToOa5TVUP5E9g';
 
-let supabase;
+let _db;
 let currentUser = null;
 let charts = {};
 let currentFile = null;
@@ -14,15 +14,15 @@ let gpxData = null;
 
 // ---- INIT ----
 document.addEventListener('DOMContentLoaded', async () => {
-  supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-  const { data: { session } } = await supabase.auth.getSession();
+  _db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const { data: { session } } = await _db.auth.getSession();
   if (session) {
     currentUser = session.user;
     showMainApp();
   } else {
     showAuthScreen();
   }
-  supabase.auth.onAuthStateChange((event, session) => {
+  _db.auth.onAuthStateChange((event, session) => {
     if (session) { currentUser = session.user; showMainApp(); }
     else { currentUser = null; showAuthScreen(); }
   });
@@ -54,7 +54,7 @@ async function handleLogin(e) {
   const msg = document.getElementById('auth-message');
   msg.textContent = 'Iniciando sesion...';
   msg.className = 'message';
-  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  const { error } = await _db.auth.signInWithPassword({ email, password });
   if (error) { msg.textContent = error.message; msg.className = 'message error'; }
 }
 
@@ -65,7 +65,7 @@ async function handleRegister(e) {
   const msg = document.getElementById('auth-message');
   msg.textContent = 'Creando cuenta...';
   msg.className = 'message';
-  const { error } = await supabase.auth.signUp({ email, password });
+  const { error } = await _db.auth.signUp({ email, password });
   if (error) { msg.textContent = error.message; msg.className = 'message error'; }
   else {
     msg.textContent = 'Cuenta creada. Revisa tu correo para confirmar.';
@@ -74,7 +74,7 @@ async function handleRegister(e) {
 }
 
 async function handleLogout() {
-  await supabase.auth.signOut();
+  await _db.auth.signOut();
 }
 
 function showAuthScreen() {
@@ -210,7 +210,7 @@ async function loadActivities() {
   const list = document.getElementById('activities-list');
   list.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
 
-  let query = supabase.from('activities').select('*').eq('user_id', currentUser.id).order('fecha_inicio', { ascending: false });
+  let query = _db.from('activities').select('*').eq('user_id', currentUser.id).order('fecha_inicio', { ascending: false });
   if (sport) query = query.eq('tipo_actividad', sport);
   if (from) query = query.gte('fecha_inicio', from);
   if (to) query = query.lte('fecha_inicio', to + 'T23:59:59');
@@ -242,7 +242,7 @@ async function loadActivities() {
 }
 
 async function showActivityDetail(id) {
-  const { data: a } = await supabase.from('activities').select('*').eq('id', id).single();
+  const { data: a } = await _db.from('activities').select('*').eq('id', id).single();
   if (!a) return;
   const modal = document.getElementById('activity-detail-modal');
   document.getElementById('detail-title').textContent = a.nombre || 'Detalle de Actividad';
@@ -285,7 +285,7 @@ async function showActivityDetail(id) {
 
 async function deleteActivity(id) {
   if (!confirm('Eliminar esta actividad?')) return;
-  const { error } = await supabase.from('activities').delete().eq('id', id);
+  const { error } = await _db.from('activities').delete().eq('id', id);
   if (!error) { closeModal('activity-detail-modal'); loadActivities(); loadDashboard(); showToast('Actividad eliminada', 'success'); }
 }
 
@@ -421,7 +421,7 @@ async function uploadActivity() {
   document.getElementById('progress-fill').style.width = '70%';
   document.getElementById('upload-status').textContent = 'Guardando en base de datos...';
 
-  const { error } = await supabase.from('activities').insert([activityData]);
+  const { error } = await _db.from('activities').insert([activityData]);
   document.getElementById('progress-fill').style.width = '100%';
 
   if (error) {
@@ -452,7 +452,7 @@ function resetUploadModal() {
 async function loadDailyMetrics() {
   if (!currentUser) return;
   const date = document.getElementById('daily-date-picker')?.value || new Date().toISOString().split('T')[0];
-  const { data } = await supabase.from('daily_metrics').select('*').eq('user_id', currentUser.id).eq('fecha', date).single();
+  const { data } = await _db.from('daily_metrics').select('*').eq('user_id', currentUser.id).eq('fecha', date).single();
   
   const set = (id, val, suffix='') => { const el = document.getElementById(id); if(el) el.textContent = val ? val + suffix : '--'; };
   set('d-steps', data?.pasos?.toLocaleString());
@@ -466,7 +466,7 @@ async function loadDailyMetrics() {
 
   // Load last 7 days chart
   const sevenDaysAgo = new Date(); sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-  const { data: weekData } = await supabase.from('daily_metrics').select('*')
+  const { data: weekData } = await _db.from('daily_metrics').select('*')
     .eq('user_id', currentUser.id).gte('fecha', sevenDaysAgo.toISOString().split('T')[0]).order('fecha');
   
   renderWellnessChart(weekData || []);
@@ -497,7 +497,7 @@ function renderWellnessChart(data) {
 // ---- RECORDS ----
 async function loadRecords() {
   if (!currentUser) return;
-  const { data: acts } = await supabase.from('activities').select('*').eq('user_id', currentUser.id).eq('tipo_actividad', 'running').order('pace_promedio_seg_km', { ascending: true });
+  const { data: acts } = await _db.from('activities').select('*').eq('user_id', currentUser.id).eq('tipo_actividad', 'running').order('pace_promedio_seg_km', { ascending: true });
   
   const findBest = (minDist, maxDist) => {
     if (!acts) return null;
@@ -516,7 +516,7 @@ async function loadRecords() {
   document.getElementById('pr-half').textContent = prHalf ? fmtTime(prHalf.duracion_segundos) : '--:--';
   document.getElementById('pr-full').textContent = prFull ? fmtTime(prFull.duracion_segundos) : '--:--';
   
-  const { data: allActs } = await supabase.from('activities').select('distancia_metros, velocidad_maxima_ms').eq('user_id', currentUser.id);
+  const { data: allActs } = await _db.from('activities').select('distancia_metros, velocidad_maxima_ms').eq('user_id', currentUser.id);
   if (allActs?.length) {
     const longest = Math.max(...allActs.map(a => a.distancia_metros || 0));
     const maxSpeed = Math.max(...allActs.map(a => a.velocidad_maxima_ms || 0));
@@ -528,7 +528,7 @@ async function loadRecords() {
 // ---- PLANS ----
 async function loadPlans() {
   if (!currentUser) return;
-  const { data } = await supabase.from('training_plans').select('*').eq('user_id', currentUser.id).order('creado_en', { ascending: false });
+  const { data } = await _db.from('training_plans').select('*').eq('user_id', currentUser.id).order('creado_en', { ascending: false });
   const list = document.getElementById('plans-list');
   if (!data?.length) { list.innerHTML = '<div class="empty-state"><div class="empty-icon">📋</div><p>No tienes planes. Crea uno!</p></div>'; return; }
   list.innerHTML = data.map(p => `
@@ -560,21 +560,21 @@ async function createPlan(e) {
     fecha_inicio: document.getElementById('plan-start').value,
     activo: true
   };
-  const { error } = await supabase.from('training_plans').insert([planData]);
+  const { error } = await _db.from('training_plans').insert([planData]);
   if (!error) { closeModal('plan-modal'); loadPlans(); showToast('Plan creado!', 'success'); e.target.reset(); }
   else showToast('Error: ' + error.message, 'error');
 }
 
 async function deletePlan(id) {
   if (!confirm('Eliminar este plan?')) return;
-  await supabase.from('training_plans').delete().eq('id', id);
+  await _db.from('training_plans').delete().eq('id', id);
   loadPlans(); showToast('Plan eliminado', 'success');
 }
 
 // ---- PROFILE ----
 async function loadProfile() {
   if (!currentUser) return;
-  const { data } = await supabase.from('user_profile').select('*').limit(1).single();
+  const { data } = await _db.from('user_profile').select('*').limit(1).single();
   if (data) {
     document.getElementById('user-name-display').textContent = data.nombre || 'Usuario';
   }
@@ -582,7 +582,7 @@ async function loadProfile() {
 
 async function loadProfilePage() {
   if (!currentUser) return;
-  const { data: p } = await supabase.from('user_profile').select('*').limit(1).single();
+  const { data: p } = await _db.from('user_profile').select('*').limit(1).single();
   if (p) {
     document.getElementById('profile-name').textContent = p.nombre || 'Sebastian Vinueza';
     const age = new Date().getFullYear() - new Date(p.fecha_nacimiento).getFullYear();
