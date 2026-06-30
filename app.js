@@ -222,8 +222,9 @@ async function openActivityDetail(id) {
   // Projections
   if (projections) html += '<div class="detail-section"><h4>&#128200; Proyecciones</h4>' + projections + '</div>';
 
-  // Delete button
-  html += '<div class="detail-actions"><button class="btn-delete-detail" onclick="deleteActivity(' + JSON.stringify(a.id) + '); closeModal('activity-detail-modal');">&#128465; Eliminar actividad</button></div>';
+  // Delete button - store id globally for safe onclick
+  window._cDetailId = String(id);
+  html += '<div class="detail-actions"><button class="btn-delete-detail" onclick="deleteActivity(window._cDetailId); closeModal(\"activity-detail-modal\");">&#128465; Eliminar actividad</button></div>';
   html += '</div>';
 
   document.getElementById('activity-detail-content').innerHTML = html;
