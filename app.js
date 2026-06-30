@@ -108,19 +108,22 @@ async function loadDashboard() {
   document.getElementById('total-calories').textContent   = totalCal.toLocaleString();
   document.getElementById('total-time').textContent       = formatDuration(totalTime, true);
   const recentList = document.getElementById('recent-list');
-  recentList.innerHTML = activities.slice(0,5).map(a =>
-    '<div class="activity-row" onclick="showActivityDetail('' + a.id + '')">'
-    + '<div class="activity-sport-icon">' + sportIcon(a.tipo_actividad) + '</div>'
-    + '<div class="activity-info">'
-    + '<div class="activity-name">' + (a.nombre||'Sin nombre') + '</div>'
-    + '<div class="activity-meta"><span>' + formatDate(a.fecha_inicio) + '</span><span>' + (a.tipo_actividad||'Actividad') + '</span></div>'
-    + '</div>'
-    + '<div class="activity-stats">'
-    + '<div class="activity-distance">' + ((a.distancia_metros||0)/1000).toFixed(2) + ' km</div>'
-    + '<div class="activity-duration">' + formatDuration(a.duracion_segundos) + '</div>'
-    + '</div></div>'
-  ).join('') || '<div class="empty-state"><div class="empty-icon">🏃</div><p>Sube tu primera actividad</p></div>';
-  renderWeeklyChart(activities);
+  recentList.innerHTML = (activities.slice(0,5).length > 0
+    ? activities.slice(0,5).map(function(a) {
+      var id = String(a.id);
+      var row = ['<div class="activity-row" onclick="showActivityDetail(', id, ')">'];
+      row.push('<div class="activity-sport-icon">' + sportIcon(a.tipo_actividad) + '</div>');
+      row.push('<div class="activity-info">');
+      row.push('<div class="activity-name">' + (a.nombre||'Sin nombre') + '</div>');
+      row.push('<div class="activity-meta"><span>' + formatDate(a.fecha_inicio) + '</span><span>' + (a.tipo_actividad||'Actividad') + '</span></div>');
+      row.push('</div><div class="activity-stats">');
+      row.push('<div class="activity-distance">' + ((a.distancia_metros||0)/1000).toFixed(2) + ' km</div>');
+      row.push('<div class="activity-duration">' + formatDuration(a.duracion_segundos) + '</div>');
+      row.push('</div></div>');
+      return row.join('');
+    }).join('')
+    : '<div class="empty-state"><p>Sube tu primera actividad</p></div>');
+    renderWeeklyChart(activities);
   renderSportChart(activities);
 }
 
@@ -173,20 +176,23 @@ async function loadActivities() {
     list.innerHTML = '<div class="empty-state"><div class="empty-icon">🏃</div><p>No hay actividades. Sube tu primera!</p></div>';
     return;
   }
-  list.innerHTML = data.map(a =>
-    '<div class="activity-card" onclick="showActivityDetail('' + a.id + '')">'  
-    + '<div class="activity-sport-icon">' + sportIcon(a.tipo_actividad) + '</div>'
-    + '<div class="activity-info">'
-    + '<div class="activity-name">' + (a.nombre||'Actividad sin nombre') + '</div>'
-    + '<div class="activity-meta"><span>' + formatDate(a.fecha_inicio) + '</span></div>'
-    + '</div>'
-    + '<div class="activity-card-stats">'
-    + '<div class="act-stat"><div class="act-stat-value">' + ((a.distancia_metros||0)/1000).toFixed(2) + '</div><div class="act-stat-label">km</div></div>'
-    + '<div class="act-stat"><div class="act-stat-value">' + formatDuration(a.duracion_segundos) + '</div><div class="act-stat-label">Tiempo</div></div>'
-    + '<div class="act-stat"><div class="act-stat-value">' + (a.frecuencia_cardiaca_promedio||'--') + '</div><div class="act-stat-label">FC Media</div></div>'
-    + '<div class="act-stat"><div class="act-stat-value">' + (a.calorias||'--') + '</div><div class="act-stat-label">kcal</div></div>'
-    + '</div></div>'
-  ).join('');
+  list.innerHTML = (data.length > 0
+    ? data.map(function(a) {
+      var id = String(a.id);
+      var card = ['<div class="activity-card" onclick="showActivityDetail(', id, ')">'];
+      card.push('<div class="activity-sport-icon">' + sportIcon(a.tipo_actividad) + '</div>');
+      card.push('<div class="activity-info">');
+      card.push('<div class="activity-name">' + (a.nombre||'Actividad sin nombre') + '</div>');
+      card.push('<div class="activity-meta"><span>' + formatDate(a.fecha_inicio) + '</span></div>');
+      card.push('</div><div class="activity-card-stats">');
+      card.push('<div class="act-stat"><div class="act-stat-value">' + ((a.distancia_metros||0)/1000).toFixed(2) + '</div><div class="act-stat-label">km</div></div>');
+      card.push('<div class="act-stat"><div class="act-stat-value">' + formatDuration(a.duracion_segundos) + '</div><div class="act-stat-label">Tiempo</div></div>');
+      card.push('<div class="act-stat"><div class="act-stat-value">' + (a.frecuencia_cardiaca_promedio||'--') + '</div><div class="act-stat-label">FC Media</div></div>');
+      card.push('<div class="act-stat"><div class="act-stat-value">' + (a.calorias||'--') + '</div><div class="act-stat-label">kcal</div></div>');
+      card.push('</div></div>');
+      return card.join('');
+    }).join('')
+    : '<div class="empty-state"><p>No hay actividades. Sube tu primera!</p></div>'))
 }
 
 async function showActivityDetail(id) {
@@ -194,25 +200,26 @@ async function showActivityDetail(id) {
   if (!a) return;
   const modal = document.getElementById('activity-detail-modal');
   document.getElementById('detail-title').textContent = a.nombre || 'Detalle de Actividad';
-  const pace = a.pace_promedio_seg_km ? formatPace(a.pace_promedio_seg_km) : '--';
-  const elev = a.elevacion_ganada_m ? a.elevacion_ganada_m.toFixed(0) + ' m' : '--';
-  document.getElementById('activity-detail-content').innerHTML =
-    '<div class="detail-stats-grid">'
-    + '<div class="detail-stat"><div class="detail-stat-label">Distancia</div><div class="detail-stat-value">' + ((a.distancia_metros||0)/1000).toFixed(2) + ' km</div></div>'
-    + '<div class="detail-stat"><div class="detail-stat-label">Tiempo</div><div class="detail-stat-value">' + formatDuration(a.duracion_segundos) + '</div></div>'
-    + '<div class="detail-stat"><div class="detail-stat-label">Ritmo</div><div class="detail-stat-value">' + pace + '/km</div></div>'
-    + '<div class="detail-stat"><div class="detail-stat-label">FC Media</div><div class="detail-stat-value">' + (a.frecuencia_cardiaca_promedio||'--') + ' bpm</div></div>'
-    + '<div class="detail-stat"><div class="detail-stat-label">FC Max</div><div class="detail-stat-value">' + (a.frecuencia_cardiaca_maxima||'--') + ' bpm</div></div>'
-    + '<div class="detail-stat"><div class="detail-stat-label">Calorias</div><div class="detail-stat-value">' + (a.calorias||'--') + ' kcal</div></div>'
-    + '<div class="detail-stat"><div class="detail-stat-label">Cadencia</div><div class="detail-stat-value">' + (a.cadencia_promedio||'--') + ' spm</div></div>'
-    + '<div class="detail-stat"><div class="detail-stat-label">Elevacion</div><div class="detail-stat-value">' + elev + '</div></div>'
-    + '<div class="detail-stat"><div class="detail-stat-label">TSS</div><div class="detail-stat-value">' + (a.training_stress_score||'--') + '</div></div>'
-    + '</div>'
-    + (a.notas ? '<div style="background:var(--bg);padding:12px;border-radius:8px;margin-bottom:12px;font-size:0.9rem;color:var(--text-muted);">📝 ' + a.notas + '</div>' : '')
-    + '<div style="display:flex;gap:10px;margin-top:12px;"><button class="btn-secondary" style="flex:1;color:var(--danger);border-color:rgba(239,68,68,0.3);" onclick="deleteActivity('' + a.id + ')">🗑️ Eliminar</button></div>';
+  var pace = a.pace_promedio_seg_km ? formatPace(a.pace_promedio_seg_km) : '--';
+  var elev = a.elevacion_ganada_m ? a.elevacion_ganada_m.toFixed(0) + ' m' : '--';
+  var html = '<div class="detail-stats-grid">';
+  html += '<div class="detail-stat"><div class="detail-stat-label">Distancia</div><div class="detail-stat-value">' + ((a.distancia_metros||0)/1000).toFixed(2) + ' km</div></div>';
+  html += '<div class="detail-stat"><div class="detail-stat-label">Tiempo</div><div class="detail-stat-value">' + formatDuration(a.duracion_segundos) + '</div></div>';
+  html += '<div class="detail-stat"><div class="detail-stat-label">Ritmo</div><div class="detail-stat-value">' + pace + '/km</div></div>';
+  html += '<div class="detail-stat"><div class="detail-stat-label">FC Media</div><div class="detail-stat-value">' + (a.frecuencia_cardiaca_promedio||'--') + ' bpm</div></div>';
+  html += '<div class="detail-stat"><div class="detail-stat-label">FC Max</div><div class="detail-stat-value">' + (a.frecuencia_cardiaca_maxima||'--') + ' bpm</div></div>';
+  html += '<div class="detail-stat"><div class="detail-stat-label">Calorias</div><div class="detail-stat-value">' + (a.calorias||'--') + ' kcal</div></div>';
+  html += '<div class="detail-stat"><div class="detail-stat-label">Cadencia</div><div class="detail-stat-value">' + (a.cadencia_promedio||'--') + ' spm</div></div>';
+  html += '<div class="detail-stat"><div class="detail-stat-label">Elevacion</div><div class="detail-stat-value">' + elev + '</div></div>';
+  html += '<div class="detail-stat"><div class="detail-stat-label">TSS</div><div class="detail-stat-value">' + (a.training_stress_score||'--') + '</div></div>';
+  html += '</div>';
+  if (a.notas) html += '<div style="background:var(--bg);padding:12px;border-radius:8px;margin-bottom:12px;">' + a.notas + '</div>';
+  html += '<div style="display:flex;gap:10px;margin-top:12px;">';
+  html += '<button class="btn-secondary" style="flex:1;color:var(--danger);" onclick="deleteActivity(' + JSON.stringify(a.id) + ')">Eliminar</button>';
+  html += '</div>';
+  document.getElementById('activity-detail-content').innerHTML = html;
   modal.classList.remove('hidden');
 }
-
 async function deleteActivity(id) {
   if (!confirm('Eliminar esta actividad?')) return;
   const { error } = await _db.from('activities').delete().eq('id', id);
@@ -713,15 +720,17 @@ async function loadPlans() {
   const { data } = await _db.from('training_plans').select('*').eq('user_id',currentUser.id).order('creado_en',{ascending:false});
   const list = document.getElementById('plans-list');
   if (!data?.length) { list.innerHTML='<div class="empty-state"><div class="empty-icon">📋</div><p>No tienes planes. Crea uno!</p></div>'; return; }
-  list.innerHTML = data.map(p =>
-    '<div class="plan-card">'
-    + '<div><h4>'+p.nombre+'</h4>'
-    + '<p style="color:var(--text-muted);font-size:0.85rem;margin-top:4px;">'+( p.descripcion||'')+'</p>'
-    + '<p style="color:var(--text-muted);font-size:0.8rem;margin-top:4px;">'+( p.semanas||0)+' semanas | Inicio: '+(p.fecha_inicio||'--')+'</p></div>'
-    + '<div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end;">'
-    + '<span class="plan-badge">'+(p.deporte||'General')+'</span>'
-    + '<button class="btn-secondary" style="font-size:0.8rem;padding:6px 12px;" onclick="deletePlan(''+p.id+'')">🗑️</button></div></div>'
-  ).join('');
+  list.innerHTML = data.map(function(p) {
+    var pid = String(p.id);
+    var card = '<div class="plan-card">';
+    card += '<div><h4>' + p.nombre + '</h4>';
+    card += '<p style="color:var(--text-muted);font-size:0.85rem;">' + (p.descripcion||'') + '</p>';
+    card += '<p style="color:var(--text-muted);font-size:0.8rem;">' + (p.semanas||0) + ' semanas | Inicio: ' + (p.fecha_inicio||'--') + '</p></div>';
+    card += '<div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end;">';
+    card += '<span class="plan-badge">' + (p.deporte||'General') + '</span>';
+    card += '<button class="btn-secondary" style="font-size:0.8rem;padding:6px 12px;" onclick="deletePlan(' + JSON.stringify(p.id) + ')">🗑️</button></div></div>';
+    return card;
+  }).join('');
 }
 
 function showCreatePlanModal() { document.getElementById('plan-modal').classList.remove('hidden'); }
