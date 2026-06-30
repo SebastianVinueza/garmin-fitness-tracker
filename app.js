@@ -118,7 +118,7 @@ function toggleSidebar() {
 // ---- DASHBOARD ----
 async function loadDashboard() {
   if (!currentUser) return;
-  const { data: activities } = await supabase
+  const { data: activities } = await _db
     .from('activities').select('*')
     .eq('user_id', currentUser.id)
     .order('fecha_inicio', { ascending: false });
@@ -411,7 +411,6 @@ async function uploadActivity() {
     activityData.frecuencia_cardiaca_promedio = gpxData.avgHr;
     activityData.frecuencia_cardiaca_maxima = gpxData.maxHr;
     activityData.elevacion_ganada_m = parseFloat(gpxData.elevGain || 0);
-    activityData.coordenadas_inicio = gpxData.startCoords;
     if (activityData.duracion_segundos > 0 && activityData.distancia_metros > 0) {
       activityData.pace_promedio_seg_km = Math.round(activityData.duracion_segundos / (activityData.distancia_metros / 1000));
     }
