@@ -192,7 +192,7 @@ async function loadActivities() {
       card.push('</div></div>');
       return card.join('');
     }).join('')
-    : '<div class="empty-state"><p>No hay actividades. Sube tu primera!</p></div>'))
+    : '<div class="empty-state"><p>No hay actividades. Sube tu primera!</p></div>')
 }
 
 async function showActivityDetail(id) {
