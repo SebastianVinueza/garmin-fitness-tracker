@@ -120,10 +120,10 @@ function toggleSidebar() {
 }
 
 function showPage(page) {
-  document.querySelectorAll('.page').forEach(function(p) { p.classList.remove('active'); p.style.display='none'; });
+  document.querySelectorAll('.page').forEach(function(p) { p.classList.remove('active'); p.classList.add('hidden'); });
   document.querySelectorAll('.nav-item').forEach(function(n) { n.classList.remove('active'); });
   var el = document.getElementById('page-' + page);
-  if (el) { el.classList.add('active'); el.style.display='block'; }
+  if (el) { el.classList.remove('hidden'); el.classList.add('active'); }
   var titleMap = { dashboard:'Dashboard', activities:'Actividades', daily:'Metricas Diarias', records:'Records', plans:'Planes', profile:'Perfil' };
   var titleEl = document.getElementById('page-title');
   if (titleEl) titleEl.textContent = titleMap[page] || page;
