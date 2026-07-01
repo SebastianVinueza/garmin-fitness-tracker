@@ -115,7 +115,7 @@ async function loadDashboard() {
     } else {
       recentList.innerHTML = activities.slice(0,5).map(function(a) {
         var parts = [];
-        parts.push('<div class="activity-row" onclick="showActivityDetail(' + JSON.stringify(String(a.id)) + ')">');
+        parts.push('<div class="activity-row" onclick="openDetail(' + JSON.stringify(String(a.id)) + ')">');
         parts.push('<div class="activity-sport-icon">' + sportIcon(a.tipo_actividad) + '</div>');
         parts.push('<div class="activity-info">');
         parts.push('<div class="activity-name">' + (a.nombre||'Sin nombre') + '</div>');
@@ -196,12 +196,12 @@ async function loadActivities() {
     parts.push('<div class="activity-card">');
     parts.push('<div class="activity-card-header">');
     parts.push('<div class="activity-sport-icon">' + sportIcon(a.tipo_actividad) + '</div>');
-    parts.push('<div class="activity-info" onclick="showActivityDetail(' + JSON.stringify(id) + ')" style="cursor:pointer;flex:1;">');
+    parts.push('<div class="activity-info" onclick="openDetail(' + JSON.stringify(id) + ')" style="cursor:pointer;flex:1;">');
     parts.push('<div class="activity-name">' + (a.nombre||'Actividad sin nombre') + '</div>');
     parts.push('<div class="activity-meta">' + formatDate(a.fecha_inicio) + ' &bull; ' + badge + '</div>');
     parts.push('</div>');
     parts.push('<div class="activity-actions">');
-    parts.push('<button class="btn-view" onclick="showActivityDetail(' + JSON.stringify(id) + ')">Ver</button>');
+    parts.push('<button class="btn-view" onclick="openDetail(' + JSON.stringify(id) + ')">Ver</button>');
     parts.push('<button class="btn-delete" onclick="deleteActivity(' + JSON.stringify(id) + ');event.stopPropagation();">🗑</button>');
     parts.push('</div></div>');
     parts.push('<div class="activity-card-stats">');
@@ -222,6 +222,7 @@ async function loadActivities() {
 }
 
 // ---- ACTIVITY DETAIL ----
+function openDetail(id) { setTimeout(function() { showActivityDetail(id); }, 10); }
 async function showActivityDetail(id) {
   if (!_db || !id) return;
   const { data: a, error } = await _db.from('activities').select('*').eq('id', id).single();
