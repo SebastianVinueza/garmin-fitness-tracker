@@ -191,7 +191,7 @@ async function loadActivities() {
     var dur = formatDuration(a.duracion_segundos);
     var fc = a.frecuencia_cardiaca_promedio || '--';
     var kcal = a.calorias || '--';
-    var badge = '<span class="sport-badge ' + (a.tipo_actividad||'other') + '">' + (a.tipo_actividad||'Actividad') + '</span>';
+    var badge = '<span class="sport-badge">' + (a.tipo_actividad||'Actividad') + '</span>';
     var parts = [];
     parts.push('<div class="activity-card">');
     parts.push('<div class="activity-card-header">');
@@ -900,7 +900,7 @@ function sportIcon(type) {
 
 function formatDuration(seconds, compact) {
   if (!seconds || seconds <= 0) return '--';
-  var s = Math.round(Number(seconds));
+  var s = Math.min(Math.round(Number(seconds)), 359999);
   var h=Math.floor(s/3600), m=Math.floor((s%3600)/60), sec=s%60;
   if (compact) return h>0 ? h+'h '+m+'m' : m+'m';
   return h>0 ? h+':'+String(m).padStart(2,'0')+':'+String(sec).padStart(2,'0') : String(m).padStart(2,'0')+':'+String(sec).padStart(2,'0');
