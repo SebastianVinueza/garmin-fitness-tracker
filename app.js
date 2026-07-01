@@ -272,7 +272,7 @@ async function showActivityDetail(id) {
   html += projHtml;
   html += aiHtml;
   html += '<div style="display:flex;gap:10px;margin-top:16px;">';
-  html += '<button class="btn-secondary" style="flex:1;" onclick="closeModal('activity-detail-modal')">Cerrar</button>';
+html += '<button class="btn-secondary" style="flex:1;" onclick="closeModal(&quot;activity-detail-modal&quot;)">Cerrar</button>';
   html += '<button class="btn-danger" style="flex:1;" onclick="deleteActivityFromDetail()">Eliminar Actividad</button>';
   html += '</div>';
 
@@ -291,7 +291,7 @@ async function deleteActivity(id, fromDetail) {
   if (!confirm('Eliminar esta actividad permanentemente?')) return;
   const { error } = await _db.from('activities').delete().eq('id', id);
   if (!error) {
-    closeModal('activity-detail-modal');
+    closeModal("activity-detail-modal");
     loadActivities();
     loadDashboard();
     showToast('Actividad eliminada', 'success');
