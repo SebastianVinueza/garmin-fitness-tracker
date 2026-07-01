@@ -288,7 +288,7 @@ function deleteActivityFromDetail() {
 }
 
 async function deleteActivity(id, fromDetail) {
-  if (!confirm('Eliminar esta actividad permanentemente?')) return;
+  // no confirm needed - direct delete
   const { error } = await _db.from('activities').delete().eq('id', id);
   if (!error) {
     closeModal("activity-detail-modal");
@@ -857,7 +857,7 @@ async function createPlan(e) {
 }
 
 async function deletePlan(id) {
-  if (!confirm('Eliminar este plan?')) return;
+  // no confirm needed - direct delete
   await _db.from('training_plans').delete().eq('id',id);
   loadPlans(); showToast('Plan eliminado','success');
 }
