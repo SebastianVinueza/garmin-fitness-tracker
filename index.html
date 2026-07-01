@@ -1,414 +1,456 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Garmin Fitness Tracker</title>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="styles.css">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Garmin Fitness Tracker</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <div id="app">
-    <!-- AUTH SCREEN -->
-    <div id="auth-screen" class="screen active">
-      <div class="auth-container">
-        <div class="logo">
-          <svg width="60" height="60" viewBox="0 0 60 60" fill="none">
-            <circle cx="30" cy="30" r="30" fill="#00B4D8"/>
-            <path d="M15 30 L25 20 L35 35 L42 25" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-            <circle cx="42" cy="25" r="3" fill="#FFB703"/>
-          </svg>
-        </div>
-        <h1>Garmin Fitness Tracker</h1>
-        <p class="tagline">Tu alternativa gratuita a Strava Premium</p>
-        <div class="auth-tabs">
-          <button class="auth-tab active" onclick="showAuthTab('login')">Iniciar Sesion</button>
-          <button class="auth-tab" onclick="showAuthTab('register')">Registrarse</button>
-        </div>
-        <form id="login-form" class="auth-form" onsubmit="handleLogin(event)">
-          <input type="email" id="login-email" placeholder="Correo electronico" required>
-          <input type="password" id="login-password" placeholder="Contrasena" required>
-          <button type="submit" class="btn-primary">Entrar</button>
-        </form>
-        <form id="register-form" class="auth-form hidden" onsubmit="handleRegister(event)">
-          <input type="email" id="reg-email" placeholder="Correo electronico" required>
-          <input type="password" id="reg-password" placeholder="Contrasena (min 6 caracteres)" required minlength="6">
-          <button type="submit" class="btn-primary">Crear Cuenta</button>
-        </form>
-        <div id="auth-message" class="message"></div>
-      </div>
-    </div>
+<div id="app">
+<!-- AUTH SCREEN -->
+<div id="auth-screen" class="screen active">
+<div class="auth-container">
+<div class="logo">
+<svg width="60" height="60" viewBox="0 0 60 60" fill="none">
+<circle cx="30" cy="30" r="30" fill="#FC4C02"/>
+<path d="M15 30 L25 20 L35 35 L42 25" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<circle cx="42" cy="25" r="3" fill="#FFB703"/>
+</svg>
+</div>
+<h1>Garmin Fitness Tracker</h1>
+<p class="tagline">Tu alternativa gratuita a Strava Premium</p>
+<div class="auth-tabs">
+<button class="auth-tab active" onclick="showAuthTab('login')">Iniciar Sesion</button>
+<button class="auth-tab" onclick="showAuthTab('register')">Registrarse</button>
+</div>
+<form id="login-form" class="auth-form" onsubmit="handleLogin(event)">
+<input type="email" id="login-email" placeholder="Correo electronico" required>
+<input type="password" id="login-password" placeholder="Contrasena" required>
+<button type="submit" class="btn-primary">Entrar</button>
+</form>
+<form id="register-form" class="auth-form hidden" onsubmit="handleRegister(event)">
+<input type="email" id="reg-email" placeholder="Correo electronico" required>
+<input type="password" id="reg-password" placeholder="Contrasena (min 6 caracteres)" required minlength="6">
+<button type="submit" class="btn-primary">Crear Cuenta</button>
+</form>
+<div id="auth-message" class="message"></div>
+</div>
+</div>
 
-    <!-- MAIN APP -->
-    <div id="main-app" class="screen hidden">
-      <!-- SIDEBAR -->
-      <nav class="sidebar">
-        <div class="sidebar-logo">
-          <svg width="32" height="32" viewBox="0 0 60 60" fill="none">
-            <circle cx="30" cy="30" r="30" fill="#00B4D8"/>
-            <path d="M15 30 L25 20 L35 35 L42 25" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-          </svg>
-          <span>GFT</span>
-        </div>
-        <ul class="nav-menu">
-          <li><a href="#" class="nav-item active" onclick="showPage('dashboard')">
-            <span class="nav-icon">📊</span><span class="nav-text">Dashboard</span>
-          </a></li>
-          <li><a href="#" class="nav-item" onclick="showPage('activities')">
-            <span class="nav-icon">🏃</span><span class="nav-text">Actividades</span>
-          </a></li>
-          <li><a href="#" class="nav-item" onclick="showPage('daily')">
-            <span class="nav-icon">📅</span><span class="nav-text">Metricas Diarias</span>
-          </a></li>
-          <li><a href="#" class="nav-item" onclick="showPage('records')">
-            <span class="nav-icon">🏆</span><span class="nav-text">Records</span>
-          </a></li>
-          <li><a href="#" class="nav-item" onclick="showPage('plans')">
-            <span class="nav-icon">📋</span><span class="nav-text">Planes</span>
-          </a></li>
-          <li><a href="#" class="nav-item" onclick="showPage('profile')">
-            <span class="nav-icon">👤</span><span class="nav-text">Perfil</span>
-          </a></li>
-        </ul>
-        <button class="btn-logout" onclick="handleLogout()">🚪 Salir</button>
-      </nav>
+<!-- MAIN APP -->
+<div id="main-app" class="screen hidden">
+<!-- SIDEBAR -->
+<nav class="sidebar">
+<div class="sidebar-logo">
+<svg width="32" height="32" viewBox="0 0 60 60" fill="none">
+<circle cx="30" cy="30" r="30" fill="#FC4C02"/>
+<path d="M15 30 L25 20 L35 35 L42 25" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+</svg>
+<span>GFT</span>
+</div>
+<ul class="nav-menu">
+<li><a href="#" class="nav-item active" onclick="showPage('dashboard')">
+<span class="nav-icon">&#x1F4CA;</span><span class="nav-text">Dashboard</span>
+</a></li>
+<li><a href="#" class="nav-item" onclick="showPage('activities')">
+<span class="nav-icon">&#x1F3C3;</span><span class="nav-text">Actividades</span>
+</a></li>
+<li><a href="#" class="nav-item" onclick="showPage('daily')">
+<span class="nav-icon">&#x1F4C5;</span><span class="nav-text">Metricas Diarias</span>
+</a></li>
+<li><a href="#" class="nav-item" onclick="showPage('records')">
+<span class="nav-icon">&#x1F3C6;</span><span class="nav-text">Records</span>
+</a></li>
+<li><a href="#" class="nav-item" onclick="showPage('plans')">
+<span class="nav-icon">&#x1F4CB;</span><span class="nav-text">Planes</span>
+</a></li>
+<li><a href="#" class="nav-item" onclick="showPage('profile')">
+<span class="nav-icon">&#x1F464;</span><span class="nav-text">Perfil</span>
+</a></li>
+</ul>
+<button class="btn-logout" onclick="handleLogout()">&#x1F6AA; Salir</button>
+</nav>
 
-      <!-- CONTENT AREA -->
-      <main class="content">
-        <!-- HEADER -->
-        <header class="top-bar">
-          <button class="menu-toggle" onclick="toggleSidebar()">☰</button>
-          <h2 id="page-title">Dashboard</h2>
-          <div class="user-info">
-            <span id="user-name-display">Sebastian</span>
-            <div class="avatar">S</div>
-          </div>
-        </header>
+<!-- CONTENT AREA -->
+<main class="content">
+<!-- HEADER -->
+<header class="top-bar">
+<button class="menu-toggle" onclick="toggleSidebar()">&#x2630;</button>
+<h2 id="page-title">Dashboard</h2>
+<div class="user-info">
+<span id="user-name-display">Sebastian</span>
+<div class="avatar">S</div>
+</div>
+</header>
 
-        <!-- DASHBOARD PAGE -->
-        <div id="page-dashboard" class="page active">
-          <div class="stats-grid">
-            <div class="stat-card blue">
-              <div class="stat-icon">🏃</div>
-              <div class="stat-info">
-                <span class="stat-value" id="total-activities">0</span>
-                <span class="stat-label">Actividades</span>
-              </div>
-            </div>
-            <div class="stat-card green">
-              <div class="stat-icon">📏</div>
-              <div class="stat-info">
-                <span class="stat-value" id="total-distance">0 km</span>
-                <span class="stat-label">Distancia Total</span>
-              </div>
-            </div>
-            <div class="stat-card orange">
-              <div class="stat-icon">🔥</div>
-              <div class="stat-info">
-                <span class="stat-value" id="total-calories">0</span>
-                <span class="stat-label">Calorias Quemadas</span>
-              </div>
-            </div>
-            <div class="stat-card purple">
-              <div class="stat-icon">⏱️</div>
-              <div class="stat-info">
-                <span class="stat-value" id="total-time">0h</span>
-                <span class="stat-label">Tiempo Total</span>
-              </div>
-            </div>
-          </div>
-          <div class="charts-row">
-            <div class="chart-card">
-              <h3>Actividades por Semana</h3>
-              <canvas id="weekly-chart"></canvas>
-            </div>
-            <div class="chart-card">
-              <h3>Distribucion por Deporte</h3>
-              <canvas id="sport-chart"></canvas>
-            </div>
-          </div>
-          <div class="recent-activities">
-            <h3>Actividades Recientes</h3>
-            <div id="recent-list"></div>
-          </div>
-        </div>
+<!-- DASHBOARD PAGE -->
+<div id="page-dashboard" class="page active">
+<div class="stats-grid">
+<div class="stat-card blue">
+<div class="stat-icon">&#x1F3C3;</div>
+<div class="stat-info">
+<span class="stat-value" id="total-activities">0</span>
+<span class="stat-label">Actividades</span>
+</div>
+</div>
+<div class="stat-card green">
+<div class="stat-icon">&#x1F4CF;</div>
+<div class="stat-info">
+<span class="stat-value" id="total-distance">0 km</span>
+<span class="stat-label">Distancia Total</span>
+</div>
+</div>
+<div class="stat-card orange">
+<div class="stat-icon">&#x1F525;</div>
+<div class="stat-info">
+<span class="stat-value" id="total-calories">0</span>
+<span class="stat-label">Calorias Quemadas</span>
+</div>
+</div>
+<div class="stat-card purple">
+<div class="stat-icon">&#x23F1;&#xFE0F;</div>
+<div class="stat-info">
+<span class="stat-value" id="total-time">0h</span>
+<span class="stat-label">Tiempo Total</span>
+</div>
+</div>
+<div class="stat-card red">
+<div class="stat-icon">&#x1F4C8;</div>
+<div class="stat-info">
+<span class="stat-value" id="stat-ctl">0</span>
+<span class="stat-label">Forma (CTL)</span>
+</div>
+</div>
+<div class="stat-card teal">
+<div class="stat-icon">&#x26A1;</div>
+<div class="stat-info">
+<span class="stat-value" id="stat-atl">0</span>
+<span class="stat-label">Fatiga (ATL)</span>
+</div>
+</div>
+<div class="stat-card gold">
+<div class="stat-icon">&#x2696;&#xFE0F;</div>
+<div class="stat-info">
+<span class="stat-value" id="stat-tsb">0</span>
+<span class="stat-label">Frescura (TSB)</span>
+</div>
+</div>
+<div class="stat-card pink">
+<div class="stat-icon">&#x2764;&#xFE0F;</div>
+<div class="stat-info">
+<span class="stat-value" id="avg-hr">-- bpm</span>
+<span class="stat-label">FC Media</span>
+</div>
+</div>
+</div>
+<div class="charts-row">
+<div class="chart-card">
+<h3>Actividades por Semana</h3>
+<canvas id="weekly-chart"></canvas>
+</div>
+<div class="chart-card">
+<h3>Distribucion por Deporte</h3>
+<canvas id="sport-chart"></canvas>
+</div>
+</div>
+<div class="chart-card full-width">
+<h3>Progreso Mensual (km)</h3>
+<canvas id="progress-chart"></canvas>
+</div>
+<div class="recent-activities">
+<h3>Actividades Recientes</h3>
+<div id="recent-list"></div>
+</div>
+</div>
 
-        <!-- ACTIVITIES PAGE -->
-        <div id="page-activities" class="page hidden">
-          <div class="page-header">
-            <h3>Mis Actividades</h3>
-            <button class="btn-primary" onclick="showUploadModal()">📁 Subir Archivo GPX/FIT/TCX</button>
-          </div>
-          <div class="filters-bar">
-            <select id="filter-sport" onchange="loadActivities()">
-              <option value="">Todos los deportes</option>
-              <option value="running">Carrera</option>
-              <option value="cycling">Ciclismo</option>
-              <option value="swimming">Natacion</option>
-              <option value="hiking">Senderismo</option>
-              <option value="walking">Caminata</option>
-              <option value="strength">Fuerza</option>
-            </select>
-            <input type="date" id="filter-date-from" onchange="loadActivities()" placeholder="Desde">
-            <input type="date" id="filter-date-to" onchange="loadActivities()" placeholder="Hasta">
-          </div>
-          <div id="activities-list" class="activities-list"></div>
-        </div>
+<!-- ACTIVITIES PAGE -->
+<div id="page-activities" class="page hidden">
+<div class="page-header">
+<h3>Mis Actividades</h3>
+<button class="btn-primary" onclick="showUploadModal()">&#x1F4C1; Subir Archivo GPX/FIT/TCX</button>
+</div>
+<div class="filters-bar">
+<select id="filter-sport" onchange="loadActivities()">
+<option value="">Todos los deportes</option>
+<option value="running">&#x1F3C3; Carrera</option>
+<option value="cycling">&#x1F6B4; Ciclismo</option>
+<option value="swimming">&#x1F3CA; Natacion</option>
+<option value="hiking">&#x1F97E; Senderismo</option>
+<option value="walking">&#x1F6B6; Caminata</option>
+<option value="strength">&#x1F3CB; Fuerza</option>
+<option value="yoga">&#x1F9D8; Yoga</option>
+<option value="triathlon">&#x1F947; Triatlon</option>
+<option value="indoor_cycling">&#x1F6B2; Ciclismo Indoor</option>
+<option value="virtual_ride">&#x1F5A5; Ciclismo Virtual</option>
+<option value="trail_running">&#x26F0; Trail</option>
+<option value="open_water">&#x1F30A; Aguas Abiertas</option>
+<option value="rowing">&#x1F6A3; Remo</option>
+<option value="skiing">&#x26F7; Esqui</option>
+<option value="crossfit">&#x1F938; CrossFit</option>
+<option value="other">&#x26A1; Otro</option>
+</select>
+<input type="date" id="filter-date-from" onchange="loadActivities()" placeholder="Desde">
+<input type="date" id="filter-date-to" onchange="loadActivities()" placeholder="Hasta">
+</div>
+<div id="activities-list" class="activities-list"></div>
+</div>
 
-        <!-- DAILY METRICS PAGE -->
-        <div id="page-daily" class="page hidden">
-          <div class="page-header">
-            <h3>Metricas Diarias</h3>
-            <input type="date" id="daily-date-picker" onchange="loadDailyMetrics()" value="">
-          </div>
-          <div id="daily-content">
-            <div class="daily-grid">
-              <div class="daily-card">
-                <span class="daily-icon">👟</span>
-                <span class="daily-value" id="d-steps">-</span>
-                <span class="daily-label">Pasos</span>
-              </div>
-              <div class="daily-card">
-                <span class="daily-icon">❤️</span>
-                <span class="daily-value" id="d-hr">-</span>
-                <span class="daily-label">FC Reposo</span>
-              </div>
-              <div class="daily-card">
-                <span class="daily-icon">🔋</span>
-                <span class="daily-value" id="d-battery">-</span>
-                <span class="daily-label">Body Battery</span>
-              </div>
-              <div class="daily-card">
-                <span class="daily-icon">😴</span>
-                <span class="daily-value" id="d-sleep">-</span>
-                <span class="daily-label">Horas Sueno</span>
-              </div>
-              <div class="daily-card">
-                <span class="daily-icon">😰</span>
-                <span class="daily-value" id="d-stress">-</span>
-                <span class="daily-label">Estres</span>
-              </div>
-              <div class="daily-card">
-                <span class="daily-icon">🫀</span>
-                <span class="daily-value" id="d-hrv">-</span>
-                <span class="daily-label">HRV</span>
-              </div>
-              <div class="daily-card">
-                <span class="daily-icon">🎯</span>
-                <span class="daily-value" id="d-readiness">-</span>
-                <span class="daily-label">Training Readiness</span>
-              </div>
-              <div class="daily-card">
-                <span class="daily-icon">🫁</span>
-                <span class="daily-value" id="d-spo2">-</span>
-                <span class="daily-label">SpO2</span>
-              </div>
-            </div>
-            <div class="weekly-wellness-chart">
-              <h4>Evolucion Semanal</h4>
-              <canvas id="wellness-chart"></canvas>
-            </div>
-          </div>
-        </div>
+<!-- DAILY METRICS PAGE -->
+<div id="page-daily" class="page hidden">
+<div class="page-header">
+<h3>Metricas Diarias</h3>
+<input type="date" id="daily-date-picker" onchange="loadDailyMetrics()" value="">
+</div>
+<div id="daily-content">
+<div class="daily-grid">
+<div class="daily-card">
+<span class="daily-icon">&#x1F45F;</span>
+<span class="daily-value" id="d-steps">-</span>
+<span class="daily-label">Pasos</span>
+</div>
+<div class="daily-card">
+<span class="daily-icon">&#x2764;&#xFE0F;</span>
+<span class="daily-value" id="d-hr">-</span>
+<span class="daily-label">FC Reposo</span>
+</div>
+<div class="daily-card">
+<span class="daily-icon">&#x1F50B;</span>
+<span class="daily-value" id="d-battery">-</span>
+<span class="daily-label">Body Battery</span>
+</div>
+<div class="daily-card">
+<span class="daily-icon">&#x1F634;</span>
+<span class="daily-value" id="d-sleep">-</span>
+<span class="daily-label">Horas Sueno</span>
+</div>
+<div class="daily-card">
+<span class="daily-icon">&#x1F630;</span>
+<span class="daily-value" id="d-stress">-</span>
+<span class="daily-label">Estres</span>
+</div>
+<div class="daily-card">
+<span class="daily-icon">&#x1FAB5;</span>
+<span class="daily-value" id="d-hrv">-</span>
+<span class="daily-label">HRV</span>
+</div>
+<div class="daily-card">
+<span class="daily-icon">&#x1F3AF;</span>
+<span class="daily-value" id="d-readiness">-</span>
+<span class="daily-label">Training Readiness</span>
+</div>
+<div class="daily-card">
+<span class="daily-icon">&#x1FAB7;</span>
+<span class="daily-value" id="d-spo2">-</span>
+<span class="daily-label">SpO2</span>
+</div>
+</div>
+<div class="weekly-wellness-chart">
+<h4>Evolucion Semanal</h4>
+<canvas id="wellness-chart"></canvas>
+</div>
+</div>
+</div>
 
-        <!-- RECORDS PAGE -->
-        <div id="page-records" class="page hidden">
-          <h3>Mis Records Personales</h3>
-          <div class="records-grid" id="records-grid">
-            <div class="record-card">
-              <span class="record-icon">🏃</span>
-              <h4>5 km</h4>
-              <span class="record-time" id="pr-5k">--:--</span>
-            </div>
-            <div class="record-card">
-              <span class="record-icon">🏃</span>
-              <h4>10 km</h4>
-              <span class="record-time" id="pr-10k">--:--</span>
-            </div>
-            <div class="record-card">
-              <span class="record-icon">🏃</span>
-              <h4>Media Maraton</h4>
-              <span class="record-time" id="pr-half">--:--</span>
-            </div>
-            <div class="record-card">
-              <span class="record-icon">🏃</span>
-              <h4>Maraton</h4>
-              <span class="record-time" id="pr-full">--:--</span>
-            </div>
-            <div class="record-card">
-              <span class="record-icon">🚴</span>
-              <h4>Mayor Distancia</h4>
-              <span class="record-time" id="pr-longest">-- km</span>
-            </div>
-            <div class="record-card">
-              <span class="record-icon">⚡</span>
-              <h4>Velocidad Max</h4>
-              <span class="record-time" id="pr-speed">-- km/h</span>
-            </div>
-          </div>
-        </div>
+<!-- RECORDS PAGE -->
+<div id="page-records" class="page hidden">
+<h3>Mis Records Personales</h3>
+<div class="records-grid" id="records-grid">
+<div class="record-card">
+<span class="record-icon">&#x1F3C3;</span>
+<h4>5 km</h4>
+<span class="record-time" id="pr-5k">--:--</span>
+</div>
+<div class="record-card">
+<span class="record-icon">&#x1F3C3;</span>
+<h4>10 km</h4>
+<span class="record-time" id="pr-10k">--:--</span>
+</div>
+<div class="record-card">
+<span class="record-icon">&#x1F3C3;</span>
+<h4>Media Maraton</h4>
+<span class="record-time" id="pr-half">--:--</span>
+</div>
+<div class="record-card">
+<span class="record-icon">&#x1F3C3;</span>
+<h4>Maraton</h4>
+<span class="record-time" id="pr-full">--:--</span>
+</div>
+<div class="record-card">
+<span class="record-icon">&#x1F6B4;</span>
+<h4>Mayor Distancia</h4>
+<span class="record-time" id="pr-longest">-- km</span>
+</div>
+<div class="record-card">
+<span class="record-icon">&#x26A1;</span>
+<h4>Velocidad Max</h4>
+<span class="record-time" id="pr-speed">-- km/h</span>
+</div>
+</div>
+</div>
 
-        <!-- PLANS PAGE -->
-        <div id="page-plans" class="page hidden">
-          <div class="page-header">
-            <h3>Planes de Entrenamiento</h3>
-            <button class="btn-primary" onclick="showCreatePlanModal()">+ Nuevo Plan</button>
-          </div>
-          <div id="plans-list"></div>
-        </div>
+<!-- PLANS PAGE -->
+<div id="page-plans" class="page hidden">
+<div class="page-header">
+<h3>Planes de Entrenamiento</h3>
+<button class="btn-primary" onclick="showCreatePlanModal()">+ Nuevo Plan</button>
+</div>
+<div id="plans-list"></div>
+</div>
 
-        <!-- PROFILE PAGE -->
-        <div id="page-profile" class="page hidden">
-          <div class="profile-container">
-            <div class="profile-header">
-              <div class="profile-avatar">S</div>
-              <div>
-                <h3 id="profile-name">Sebastian Vinueza</h3>
-                <span class="profile-badge">Intermedio</span>
-              </div>
-            </div>
-            <div class="profile-stats">
-              <div class="profile-stat">
-                <span class="ps-label">Edad</span>
-                <span class="ps-value" id="p-age">38 anos</span>
-              </div>
-              <div class="profile-stat">
-                <span class="ps-label">Peso</span>
-                <span class="ps-value" id="p-weight">73 kg</span>
-              </div>
-              <div class="profile-stat">
-                <span class="ps-label">Estatura</span>
-                <span class="ps-value" id="p-height">1.72 m</span>
-              </div>
-              <div class="profile-stat">
-                <span class="ps-label">IMC</span>
-                <span class="ps-value" id="p-bmi">24.7</span>
-              </div>
-              <div class="profile-stat">
-                <span class="ps-label">FC Max Teorica</span>
-                <span class="ps-value" id="p-maxhr">182 bpm</span>
-              </div>
-              <div class="profile-stat">
-                <span class="ps-label">FC Reposo</span>
-                <span class="ps-value" id="p-resthr">60 bpm</span>
-              </div>
-            </div>
-            <div class="zones-section">
-              <h4>Zonas de Frecuencia Cardiaca</h4>
-              <div class="zones-grid">
-                <div class="zone-bar z1"><span>Zona 1 (50-60%)</span><span>91-109 bpm</span></div>
-                <div class="zone-bar z2"><span>Zona 2 (60-70%)</span><span>109-127 bpm</span></div>
-                <div class="zone-bar z3"><span>Zona 3 (70-80%)</span><span>127-146 bpm</span></div>
-                <div class="zone-bar z4"><span>Zona 4 (80-90%)</span><span>146-164 bpm</span></div>
-                <div class="zone-bar z5"><span>Zona 5 (90-100%)</span><span>164-182 bpm</span></div>
-              </div>
-            </div>
-            <div class="garmin-connect-section">
-              <h4>Conexion Garmin</h4>
-              <p>Conecta tu cuenta de Garmin Connect para sincronizar actividades automaticamente.</p>
-              <button class="btn-garmin" onclick="connectGarmin()">
-                <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/e/e0/Garmin_logo.svg/200px-Garmin_logo.svg.png" alt="Garmin" height="20"> Conectar con Garmin
-              </button>
-            </div>
-          </div>
-        </div>
-      </main>
-    </div>
+<!-- PROFILE PAGE -->
+<div id="page-profile" class="page hidden">
+<div class="profile-container">
+<div class="profile-header">
+<div class="profile-avatar">S</div>
+<div>
+<h3 id="profile-name">Sebastian Vinueza</h3>
+<span class="profile-badge">Intermedio</span>
+</div>
+</div>
+<div class="profile-stats">
+<div class="profile-stat">
+<span class="ps-label">Edad</span>
+<span class="ps-value" id="p-age">38 anos</span>
+</div>
+<div class="profile-stat">
+<span class="ps-label">Peso</span>
+<span class="ps-value" id="p-weight">73 kg</span>
+</div>
+<div class="profile-stat">
+<span class="ps-label">Estatura</span>
+<span class="ps-value" id="p-height">1.72 m</span>
+</div>
+<div class="profile-stat">
+<span class="ps-label">IMC</span>
+<span class="ps-value" id="p-bmi">24.7</span>
+</div>
+<div class="profile-stat">
+<span class="ps-label">FC Max Teorica</span>
+<span class="ps-value" id="p-maxhr">182 bpm</span>
+</div>
+<div class="profile-stat">
+<span class="ps-label">FC Reposo</span>
+<span class="ps-value" id="p-resthr">60 bpm</span>
+</div>
+</div>
+<div class="zones-section">
+<h4>Zonas de Frecuencia Cardiaca</h4>
+<div class="zones-grid">
+<div class="zone-bar z1"><span>Zona 1 (50-60%)</span><span>91-109 bpm</span></div>
+<div class="zone-bar z2"><span>Zona 2 (60-70%)</span><span>109-127 bpm</span></div>
+<div class="zone-bar z3"><span>Zona 3 (70-80%)</span><span>127-146 bpm</span></div>
+<div class="zone-bar z4"><span>Zona 4 (80-90%)</span><span>146-164 bpm</span></div>
+<div class="zone-bar z5"><span>Zona 5 (90-100%)</span><span>164-182 bpm</span></div>
+</div>
+</div>
+</div>
+</div>
+</main>
+</div>
 
-    <!-- UPLOAD MODAL -->
-    <div id="upload-modal" class="modal hidden">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h3>📁 Subir Actividad</h3>
-          <button onclick="closeModal('upload-modal')">✕</button>
-        </div>
-        <div class="upload-area" id="upload-area" 
-             ondragover="event.preventDefault(); this.classList.add('drag-over')"
-             ondragleave="this.classList.remove('drag-over')"
-             ondrop="handleDrop(event)">
-          <div class="upload-icon">📤</div>
-          <p>Arrastra tu archivo aqui o haz clic para seleccionar</p>
-          <p class="upload-formats">Formatos soportados: <strong>.GPX, .FIT, .TCX, .CSV</strong></p>
-          <input type="file" id="file-input" accept=".gpx,.fit,.tcx,.csv" onchange="handleFileSelect(event)" hidden>
-          <button class="btn-secondary" onclick="document.getElementById('file-input').click()">Seleccionar Archivo</button>
-        </div>
-        <div id="upload-preview" class="hidden">
-          <div class="file-info">
-            <span id="file-name-display"></span>
-            <span id="file-size-display"></span>
-          </div>
-          <div class="activity-form">
-            <input type="text" id="activity-name" placeholder="Nombre de la actividad">
-            <select id="activity-type">
-              <option value="running">Carrera</option>
-              <option value="cycling">Ciclismo</option>
-              <option value="swimming">Natacion</option>
-              <option value="hiking">Senderismo</option>
-              <option value="walking">Caminata</option>
-              <option value="strength">Fuerza</option>
-              <option value="other">Otro</option>
-            </select>
-            <textarea id="activity-notes" placeholder="Notas (opcional)"></textarea>
-            <div class="rpe-selector">
-              <label>Percepcion de Esfuerzo (RPE):</label>
-              <input type="range" id="activity-rpe" min="1" max="10" value="5">
-              <span id="rpe-value">5</span>
-            </div>
-          </div>
-          <button class="btn-primary" onclick="uploadActivity()">💾 Guardar Actividad</button>
-        </div>
-        <div id="upload-progress" class="hidden">
-          <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
-          <p id="upload-status">Procesando archivo...</p>
-        </div>
-      </div>
-    </div>
+<!-- UPLOAD MODAL -->
+<div id="upload-modal" class="modal hidden">
+<div class="modal-content">
+<div class="modal-header">
+<h3>&#x1F4C1; Subir Actividad</h3>
+<button class="btn-close-modal" onclick="closeModal('upload-modal')">&#x2715;</button>
+</div>
+<div class="upload-area" id="upload-area"
+ondragover="event.preventDefault(); this.classList.add('drag-over')"
+ondragleave="this.classList.remove('drag-over')"
+ondrop="handleDrop(event)">
+<div class="upload-icon">&#x1F4E4;</div>
+<p>Arrastra tu archivo aqui o haz clic para seleccionar</p>
+<p class="upload-formats">Formatos soportados: <strong>.GPX, .FIT, .TCX</strong></p>
+<input type="file" id="file-input" accept=".gpx,.fit,.tcx,.csv" onchange="handleFileSelect(event)" hidden>
+<button class="btn-secondary" onclick="document.getElementById('file-input').click()">Seleccionar Archivo</button>
+</div>
+<div id="upload-preview" class="hidden">
+<div class="file-info">
+<span id="file-name-display"></span>
+<span id="file-size-display"></span>
+</div>
+<div class="activity-form">
+<input type="text" id="activity-name" placeholder="Nombre de la actividad">
+<select id="activity-type">
+<option value="running">Carrera</option>
+<option value="cycling">Ciclismo</option>
+<option value="swimming">Natacion</option>
+<option value="hiking">Senderismo</option>
+<option value="walking">Caminata</option>
+<option value="strength">Fuerza</option>
+<option value="yoga">Yoga</option>
+<option value="triathlon">Triatlon</option>
+<option value="indoor_cycling">Ciclismo Indoor</option>
+<option value="virtual_ride">Ciclismo Virtual</option>
+<option value="trail_running">Trail Running</option>
+<option value="open_water">Aguas Abiertas</option>
+<option value="rowing">Remo</option>
+<option value="skiing">Esqui</option>
+<option value="crossfit">CrossFit</option>
+<option value="other">Otro</option>
+</select>
+<textarea id="activity-notes" placeholder="Notas (opcional)"></textarea>
+<div class="rpe-selector">
+<label>Percepcion de Esfuerzo (RPE):</label>
+<input type="range" id="activity-rpe" min="1" max="10" value="5" oninput="document.getElementById('rpe-value').textContent=this.value">
+<span id="rpe-value">5</span>
+</div>
+</div>
+<button class="btn-primary" onclick="uploadActivity()">&#x1F4BE; Guardar Actividad</button>
+</div>
+<div id="upload-progress" class="hidden">
+<div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+<p id="upload-status">Procesando archivo...</p>
+</div>
+</div>
+</div>
 
-    <!-- ACTIVITY DETAIL MODAL -->
-    <div id="activity-detail-modal" class="modal hidden">
-      <div class="modal-content large">
-        <div class="modal-header">
-          <h3 id="detail-title">Detalle de Actividad</h3>
-          <button onclick="closeModal('activity-detail-modal')">✕</button>
-        </div>
-        <div id="activity-detail-content"></div>
-      </div>
-    </div>
+<!-- ACTIVITY DETAIL MODAL -->
+<div id="activity-detail-modal" class="modal hidden">
+<div class="modal-content large">
+<div class="modal-header">
+<h3 id="detail-title">Detalle de Actividad</h3>
+<button class="btn-close-modal" onclick="closeModal('activity-detail-modal')">&#x2715;</button>
+</div>
+<div id="activity-detail-content"></div>
+</div>
+</div>
 
-    <!-- CREATE PLAN MODAL -->
-    <div id="plan-modal" class="modal hidden">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h3>Nuevo Plan de Entrenamiento</h3>
-          <button onclick="closeModal('plan-modal')">✕</button>
-        </div>
-        <form onsubmit="createPlan(event)">
-          <input type="text" id="plan-name" placeholder="Nombre del plan" required>
-          <textarea id="plan-desc" placeholder="Descripcion"></textarea>
-          <select id="plan-sport">
-            <option value="running">Carrera</option>
-            <option value="cycling">Ciclismo</option>
-            <option value="triathlon">Triatlon</option>
-            <option value="general">General</option>
-          </select>
-          <select id="plan-level">
-            <option value="beginner">Principiante</option>
-            <option value="intermediate">Intermedio</option>
-            <option value="advanced">Avanzado</option>
-          </select>
-          <input type="number" id="plan-weeks" placeholder="Duracion (semanas)" min="1" max="52">
-          <input type="date" id="plan-start" required>
-          <button type="submit" class="btn-primary">Crear Plan</button>
-        </form>
-      </div>
-    </div>
+<!-- CREATE PLAN MODAL -->
+<div id="plan-modal" class="modal hidden">
+<div class="modal-content">
+<div class="modal-header">
+<h3>Nuevo Plan de Entrenamiento</h3>
+<button class="btn-close-modal" onclick="closeModal('plan-modal')">&#x2715;</button>
+</div>
+<form onsubmit="createPlan(event)">
+<input type="text" id="plan-name" placeholder="Nombre del plan" required>
+<textarea id="plan-desc" placeholder="Descripcion"></textarea>
+<select id="plan-sport">
+<option value="running">Carrera</option>
+<option value="cycling">Ciclismo</option>
+<option value="triathlon">Triatlon</option>
+<option value="general">General</option>
+</select>
+<select id="plan-level">
+<option value="beginner">Principiante</option>
+<option value="intermediate">Intermedio</option>
+<option value="advanced">Avanzado</option>
+</select>
+<input type="number" id="plan-weeks" placeholder="Duracion (semanas)" min="1" max="52">
+<input type="date" id="plan-start" required>
+<button type="submit" class="btn-primary">Crear Plan</button>
+</form>
+</div>
+</div>
 
-    <div id="toast" class="toast hidden"></div>
-  </div>
+<div id="toast" class="toast hidden"></div>
+</div>
 
-  <script src="app.js"></script>
+<script src="app.js"></script>
 </body>
 </html>
