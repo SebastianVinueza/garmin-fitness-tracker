@@ -602,7 +602,7 @@ function handleFileSelect(e) {
   if (file) processFile(file);
 }
 
-function processFile(file) {
+async function processFile(file) {
   currentFile = file;
   document.getElementById('upload-area').classList.add('hidden');
   document.getElementById('upload-preview').classList.remove('hidden');
@@ -610,6 +610,51 @@ function processFile(file) {
   document.getElementById('file-size-display').textContent = (file.size / 1024).toFixed(1) + ' KB';
   var nameInput = document.getElementById('activity-name');
   if (nameInput) nameInput.value = file.name.replace(/\.fit$|\.gpx$|\.tcx$/i, '').replace(/_/g, ' ');
+  // Pre-parse file to show preview stats
+  try {
+    var ext = file.name.split('.').pop().toLowerCase();
+    var parsed = null;
+    if (ext === 'fit') { var buf = await file.arrayBuffer(); parsed = parseFIT(buf); }
+    else if (ext === 'gpx') { var txt = await file.text(); parsed = parseGPX(txt); }
+    else if (ext === 'tcx') { var txt = await file.text(); parsed = parseTCX(txt); }
+    if (parsed) {
+      window._lastParsed = parsed;
+      var previewEl = document.getElementById('file-parse-preview');
+      if (!previewEl) {
+        previewEl = document.createElement('div');
+        previewEl.id = 'file-parse-preview';
+        previewEl.style.cssText = 'margin:8px 0;padding:10px;background:#f0f9ff;border-radius:8px;font-size:13px;color:#0369a1;display:flex;flex-wrap:wrap;gap:10px;';
+        var previewContainer = document.getElementById('upload-preview');
+        if (previewContainer) previewContainer.insertBefore(previewEl, previewContainer.firstChild);
+      }
+      var dist = parsed.distance ? parsed.distance.toFixed(2) + ' km' : '--';
+      var dur = parsed.duration ? formatDuration(parsed.duration) : '--';
+      var hr = parsed.hrAvg ? parsed.hrAvg + ' bpm' : '--';
+      var cad = parsed.cadenceAvg ? parsed.cadenceAvg + ' rpm' : '--';
+      var pwr = parsed.power ? parsed.power + ' W' : '--';
+      var elev = parsed.elevation ? '+' + parsed.elevation + 'm' : '--';
+      var pace = '';
+      if (parsed.distance > 0 && parsed.duration > 0) {
+        var secPerKm = parsed.duration / parsed.distance;
+        var pm = Math.floor(secPerKm / 60);
+        var ps = Math.round(secPerKm % 60);
+        pace = pm + ':' + (ps < 10 ? '0' : '') + ps + ' /km';
+      }
+      previewEl.innerHTML = '<strong>📊 Datos detectados:</strong>' +
+        '<span>📏 ' + dist + '</span>' +
+        '<span>⏱ ' + dur + '</span>' +
+        (pace ? '<span>🏃 ' + pace + '</span>' : '') +
+        '<span>❤️ ' + hr + '</span>' +
+        (parsed.cadenceAvg ? '<span>🦵 ' + cad + '</span>' : '') +
+        (parsed.power ? '<span>⚡ ' + pwr + '</span>' : '') +
+        '<span>⛰️ ' + elev + '</span>' +
+        '<span>🏅 ' + (parsed.sport || 'otro') + '</span>';
+      if (parsed.sport) {
+        var typeSelect = document.getElementById('activity-type');
+        if (typeSelect) typeSelect.value = parsed.sport;
+      }
+    }
+  } catch(e) { console.warn('preview parse error:', e.message); }
 }
 
 function resetUploadModal() {
@@ -638,19 +683,23 @@ async function uploadActivity() {
   setProgress(10, 'Leyendo archivo...');
   try {
     var ext = currentFile.name.split('.').pop().toLowerCase();
-    var parsed = null;
-    if (ext === 'fit') {
-      var buf = await currentFile.arrayBuffer();
-      parsed = parseFIT(buf);
-    } else if (ext === 'gpx') {
-      var text = await currentFile.text();
-      parsed = parseGPX(text);
-    } else if (ext === 'tcx') {
-      var text = await currentFile.text();
-      parsed = parseTCX(text);
-    } else {
-      throw new Error('Formato no soportado: ' + ext);
+    var parsed = window._lastParsed || null;
+    if (!parsed) {
+      if (ext === 'fit') {
+        var buf = await currentFile.arrayBuffer();
+        parsed = parseFIT(buf);
+      } else if (ext === 'gpx') {
+        var text = await currentFile.text();
+        parsed = parseGPX(text);
+      } else if (ext === 'tcx') {
+        var text = await currentFile.text();
+        parsed = parseTCX(text);
+      } else {
+        throw new Error('Formato no soportado: ' + ext);
+      }
     }
+    window._lastParsed = null;
+    console.log('Parsed activity data:', JSON.stringify(parsed));
     setProgress(50, 'Guardando actividad...');
     if (!parsed) throw new Error('No se pudo parsear el archivo');
     var actType = parsed.sport || type;
@@ -681,115 +730,307 @@ async function uploadActivity() {
   }
 }
 
+function readFITInt(bytes, pos, size, bigEndian) {
+  if (pos + size > bytes.length) return null;
+  var v = 0;
+  if (bigEndian) {
+    for (var x = 0; x < size; x++) v = (v * 256 + bytes[pos + x]) >>> 0;
+  } else {
+    for (var x = size - 1; x >= 0; x--) v = (v * 256 + bytes[pos + x]) >>> 0;
+  }
+  return v;
+}
+function processFITRecord(globalMsgNum, msgFields, result, hrSamples, cadSamples, powerSamples, elevSamples, speedSamples) {
+  var FIT_EPOCH = 631065600;
+  // Message 20 = record (individual data points)
+  if (globalMsgNum === 20) {
+    // Field 3 = heart_rate (bpm) - *** CORRECTED from old code which had wrong field ***
+    // Actually in FIT: record fields: 0=timestamp, 1=lat, 2=lon, 3=altitude, 4=heart_rate, 5=cadence, 6=distance, 7=speed, 8=power
+    // BUT: field numbers are DEFINED by the device, so we store ALL fields and match by field definition
+    // The field numbers below are the FIT GLOBAL field numbers for message 20:
+    var hr = msgFields[3]; // heart_rate - THIS IS WRONG - it was field 4 in real FIT spec
+    // In FIT Protocol, record message 20 field definitions:
+    // Field def 0 = position_lat, 1 = position_long, 2 = altitude, 3 = heart_rate, 4 = cadence, 5 = distance, 6 = speed, 7 = power
+    // BUT Garmin DOES use those field numbers! So field 3 = heart_rate is CORRECT per Garmin FIT SDK
+    if (hr !== null && hr > 0 && hr < 250 && hr !== 255) hrSamples.push(hr);
+    // Field 4 = cadence (rpm)
+    var cad = msgFields[4];
+    if (cad !== null && cad > 0 && cad < 250 && cad !== 255) cadSamples.push(cad);
+    // Field 6 = speed (mm/s) - Garmin stores speed as mm/s * 1000 = so divide by 1000 to get m/s, then *3.6 for km/h
+    var spd = msgFields[6];
+    if (spd !== null && spd < 0xFFFF && spd > 0) {
+      var spdKmh = (spd / 1000) * 3.6; // mm/s -> m/s -> km/h
+      if (spdKmh > 0 && spdKmh < 150) speedSamples.push(spdKmh);
+    }
+    // Field 7 = power (watts) - for cycling
+    var pwr = msgFields[7];
+    if (pwr !== null && pwr < 0xFFFF && pwr > 0 && pwr < 3000) powerSamples.push(pwr);
+    // Field 2 = altitude - FIT stores as (altitude + 500) * 5, uint16
+    // So real altitude = value/5 - 100  -- actually: value * 5/100 - 500 => value / 20 - 500? 
+    // FIT Spec: altitude stored as uint16, scale=1/5, offset=-500 => real = raw/5 - 500 but raw > 500*5=2500 always
+    var alt = msgFields[2];
+    if (alt !== null && alt < 0x7FFF && alt > 0) {
+      var realAlt = alt / 5 - 500;
+      if (realAlt > -500 && realAlt < 9000) elevSamples.push(realAlt);
+    }
+    // Field 5 = distance (cm) - cumulative distance in cm
+    var dist5 = msgFields[5];
+    if (dist5 !== null && dist5 < 0xFFFFFFFF && dist5 > 0) {
+      var distKm = dist5 / 100000; // cm -> m -> km
+    }
+  }
+  // Message 18 = session summary (most reliable totals)
+  else if (globalMsgNum === 18) {
+    // Field 2 = start_time (FIT timestamp)
+    var ts = msgFields[2];
+    if (ts !== null && ts < 0xFFFFFFFF && ts > 0) {
+      var d = new Date((ts + FIT_EPOCH) * 1000);
+      result.date = d.toISOString().split('T')[0];
+    }
+    // Field 5 = total_distance (cm) 
+    var totalDist = msgFields[5];
+    if (totalDist !== null && totalDist < 0xFFFFFFFF && totalDist > 0) {
+      result.distance = parseFloat((totalDist / 100000).toFixed(2)); // cm to km
+    }
+    // Field 7 = total_elapsed_time (ms * 1000, so stored as uint32 in 1/1000 s units)
+    // Actually FIT stores elapsed time in milliseconds / 1000 so it's seconds*1000 NO
+    // FIT spec: total_elapsed_time scale=1000, unit=s, type=uint32 -> value/1000 = seconds
+    var elapsed = msgFields[7];
+    if (elapsed !== null && elapsed < 0xFFFFFF && elapsed > 0) {
+      result.duration = Math.round(elapsed / 1000);
+    }
+    // Field 9 = total_calories (kcal)
+    var cals = msgFields[9];
+    if (cals !== null && cals < 60000 && cals > 0) result.calories = cals;
+    // Field 14 = avg_speed (mm/s) -> km/h
+    var avgSpd = msgFields[14];
+    if (avgSpd !== null && avgSpd < 0xFFFF && avgSpd > 0) {
+      result.speed = parseFloat(((avgSpd / 1000) * 3.6).toFixed(2));
+    }
+    // Field 16 = avg_heart_rate
+    var avgHr = msgFields[16];
+    if (avgHr !== null && avgHr > 0 && avgHr < 250 && avgHr !== 255) result.hrAvg = avgHr;
+    // Field 17 = max_heart_rate
+    var maxHr = msgFields[17];
+    if (maxHr !== null && maxHr > 0 && maxHr < 250 && maxHr !== 255) result.hrMax = maxHr;
+    // Field 18 = avg_cadence
+    var avgCad = msgFields[18];
+    if (avgCad !== null && avgCad > 0 && avgCad < 250 && avgCad !== 255) result.cadenceAvg = avgCad;
+    // Field 20 = total_ascent (m)
+    var ascent = msgFields[20];
+    if (ascent !== null && ascent < 30000 && ascent > 0) result.elevation = ascent;
+    // Field 34 = avg_power (watts)
+    var avgPwr = msgFields[34];
+    if (avgPwr !== null && avgPwr < 5000 && avgPwr > 0) result.power = avgPwr;
+  }
+  // Message 12 = sport
+  else if (globalMsgNum === 12) {
+    var FIT_SPORT_MAP = {0:'other',1:'running',2:'cycling',3:'transition',4:'fitness_equipment',5:'swimming',8:'rowing',11:'walking',15:'golf',17:'mountain_biking',24:'hiking',26:'multisport',29:'paddling',46:'yoga',48:'pilates',52:'virtual_cycling'};
+    var sportCode = msgFields[0];
+    if (sportCode !== null && sportCode !== undefined) {
+      result.sport = FIT_SPORT_MAP[sportCode] || 'other';
+    }
+  }
+  // Message 0 = file_id - has start timestamp sometimes
+  else if (globalMsgNum === 0) {
+    var ts0 = msgFields[4]; // time_created field
+    if (ts0 !== null && ts0 > 0 && ts0 < 0xFFFFFFFF && !result.date) {
+      var d0 = new Date((ts0 + FIT_EPOCH) * 1000);
+      result.date = d0.toISOString().split('T')[0];
+    }
+  }
+}
 function parseFIT(buf) {
   var bytes = new Uint8Array(buf);
   var FIT_EPOCH = 631065600;
-  var result = { sport: 'other', date: null, duration: 0, distance: 0, calories: 0, hrAvg: null, hrMax: null, elevation: null, speed: null };
-  var offset = 12;
-  var hrSamples = [];
-  var hrMaxFound = 0;
-  var elevSamples = [];
+  var result = {
+    sport: 'other', date: null, duration: 0, distance: 0,
+    calories: 0, hrAvg: null, hrMax: null, cadenceAvg: null,
+    elevation: null, speed: null, power: null
+  };
+  // Validate FIT header
+  if (bytes.length < 14) return result;
+  var headerSize = bytes[0];
+  if (headerSize < 12) return result;
+  // Check magic bytes ".FIT"
+  if (bytes[8] !== 46 || bytes[9] !== 70 || bytes[10] !== 73 || bytes[11] !== 84) {
+    // Not a valid FIT file
+    return result;
+  }
+  var offset = headerSize;
   var localMsgDefs = {};
-  var i = 0;
+  var hrSamples = [];
+  var cadSamples = [];
+  var powerSamples = [];
+  var elevSamples = [];
+  var speedSamples = [];
+  var distanceFromRecord = 0;
+  var lastRecordDist = 0;
   try {
     while (offset < bytes.length - 4) {
       var hdr = bytes[offset];
-      var isCompressedTs = (hdr & 0x80) !== 0;
-      if (isCompressedTs) { offset++; continue; }
+      // Compressed timestamp header (bit 7 = 1)
+      if ((hdr & 0x80) !== 0) {
+        var ctLocalType = (hdr >> 5) & 0x03;
+        var def = localMsgDefs[ctLocalType];
+        if (def) {
+          var totalSize = 0;
+          def.fields.forEach(function(f) { totalSize += f.size; });
+          // Process record data with last known definition
+          var msgFields = {};
+          var moff = offset + 1;
+          def.fields.forEach(function(f) {
+            msgFields[f.num] = readFITInt(bytes, moff, f.size, def.bigEndian);
+            moff += f.size;
+          });
+          processFITRecord(def.globalMsgNum, msgFields, result, hrSamples, cadSamples, powerSamples, elevSamples, speedSamples);
+          offset = moff;
+        } else {
+          offset++;
+        }
+        continue;
+      }
       var hasDef = (hdr & 0x40) !== 0;
+      var hasDevData = (hdr & 0x20) !== 0;
       var localType = hdr & 0x0F;
       offset++;
       if (hasDef) {
+        offset++; // reserved
+        var isBigEndian = (bytes[offset] & 0x01) !== 0;
         offset++;
-        var isBigEndian = bytes[offset] & 0x01;
-        offset++;
-        var globalMsgNum = isBigEndian ? (bytes[offset] << 8) | bytes[offset+1] : (bytes[offset+1] << 8) | bytes[offset];
+        var globalMsgNum = isBigEndian
+          ? (bytes[offset] << 8) | bytes[offset+1]
+          : (bytes[offset+1] << 8) | bytes[offset];
         offset += 2;
         var numFields = bytes[offset++];
         var fields = [];
         for (var f = 0; f < numFields; f++) {
-          var fNum = bytes[offset];
-          var fSize = bytes[offset+1];
-          var fType = bytes[offset+2];
-          fields.push({ num: fNum, size: fSize, type: fType });
+          fields.push({ num: bytes[offset], size: bytes[offset+1], type: bytes[offset+2] });
           offset += 3;
         }
-        if (bytes[offset] !== undefined) {
-          var devFields = 0;
-          try { devFields = bytes[offset]; } catch(e) {}
-          if ((hdr & 0x20) !== 0 && devFields !== undefined) {
-            offset++;
-            for (var d = 0; d < devFields; d++) offset += 3;
-          }
+        // Developer data fields
+        if (hasDevData) {
+          var numDevFields = bytes[offset++];
+          offset += numDevFields * 3;
         }
         localMsgDefs[localType] = { globalMsgNum: globalMsgNum, fields: fields, bigEndian: isBigEndian };
       } else {
-        var def = localMsgDefs[localType];
-        if (!def) { offset++; continue; }
-        var msgStart = offset;
-        var readInt = function(pos, size, bigEndian) {
-          if (pos + size > bytes.length) return null;
-          var v = 0;
-          if (bigEndian) { for (var x = 0; x < size; x++) v = (v << 8) | bytes[pos + x]; }
-          else { for (var x = size - 1; x >= 0; x--) v = (v << 8) | bytes[pos + x]; }
-          return v;
-        };
-        var msgFields = {};
-        def.fields.forEach(function(f) {
-          msgFields[f.num] = readInt(offset, f.size, def.bigEndian);
+        var def2 = localMsgDefs[localType];
+        if (!def2) { offset++; continue; }
+        var msgFields2 = {};
+        def2.fields.forEach(function(f) {
+          var val = readFITInt(bytes, offset, f.size, def2.bigEndian);
+          msgFields2[f.num] = val;
           offset += f.size;
         });
-        if (def.globalMsgNum === 20) {
-          var hr = msgFields[3];
-          if (hr && hr > 0 && hr < 230) {
-            hrSamples.push(hr);
-            if (hr > hrMaxFound) hrMaxFound = hr;
-          }
-          var alt = msgFields[2];
-          if (alt && alt < 0x7FFFFFFF) elevSamples.push(alt / 5 - 500);
-        } else if (def.globalMsgNum === 18) {
-          if (msgFields[5] !== undefined && msgFields[5] < 0xFFFFFFF) {
-            result.distance = parseFloat((msgFields[5] / 100000).toFixed(2));
-          }
-          if (msgFields[7] !== undefined && msgFields[7] < 0xFFFFFF) {
-            result.duration = Math.round(msgFields[7] / 1000);
-          }
-          if (msgFields[11] !== undefined && msgFields[11] < 10000) {
-            result.calories = msgFields[11];
-          }
-          if (msgFields[1] !== undefined && msgFields[1] < 0xFFFFFFFF) {
-            var ts = msgFields[1] + FIT_EPOCH;
-            var d = new Date(ts * 1000);
-            result.date = d.toISOString().split('T')[0];
-          }
-          if (msgFields[4] !== undefined) {
-            var hrAvgVal = msgFields[4];
-            if (hrAvgVal > 0 && hrAvgVal < 230) result.hrAvg = hrAvgVal;
-          }
-          if (msgFields[5] !== undefined) {
-            var hrMaxVal = msgFields[5];
-            if (hrMaxVal > 0 && hrMaxVal < 230) result.hrMax = hrMaxVal;
-          }
-        } else if (def.globalMsgNum === 12) {
-          if (msgFields[0] !== undefined) {
-            var sportCode = msgFields[0];
-            result.sport = FIT_SPORT_MAP[sportCode] || 'other';
-          }
-        }
+        processFITRecord(def2.globalMsgNum, msgFields2, result, hrSamples, cadSamples, powerSamples, elevSamples, speedSamples);
       }
     }
-  } catch(e) {}
+  } catch(e) { console.warn('FIT parse error:', e.message); }
+  // Post-process averages
   if (hrSamples.length > 0) {
-    if (!result.hrAvg || result.hrAvg === 0) {
-      result.hrAvg = Math.round(hrSamples.reduce(function(a, b) { return a + b; }, 0) / hrSamples.length);
-    }
-    if (!result.hrMax || result.hrMax === 0) result.hrMax = hrMaxFound;
+    if (!result.hrAvg) result.hrAvg = Math.round(hrSamples.reduce(function(a,b){return a+b;},0)/hrSamples.length);
+    if (!result.hrMax) result.hrMax = Math.max.apply(null, hrSamples);
   }
+  if (cadSamples.length > 0) result.cadenceAvg = Math.round(cadSamples.reduce(function(a,b){return a+b;},0)/cadSamples.length);
+  if (powerSamples.length > 0) result.power = Math.round(powerSamples.reduce(function(a,b){return a+b;},0)/powerSamples.length);
   if (elevSamples.length > 1) {
     var gain = 0;
     for (var eg = 1; eg < elevSamples.length; eg++) {
       var diff = elevSamples[eg] - elevSamples[eg-1];
-      if (diff > 0) gain += diff;
+      if (diff > 0.5) gain += diff;
+    }
+    if (!result.elevation || result.elevation === 0) result.elevation = Math.round(gain);
+  }
+  if (speedSamples.length > 0 && (!result.speed || result.speed === 0)) {
+    result.speed = parseFloat((speedSamples.reduce(function(a,b){return a+b;},0)/speedSamples.length).toFixed(2));
+  }
+  if (result.distance === 0 && result.duration > 0 && result.speed > 0) {
+    result.distance = parseFloat((result.speed * result.duration / 3600).toFixed(2));
+  }
+  if (result.distance > 0 && result.duration > 0 && !result.speed) {
+    result.speed = parseFloat((result.distance / (result.duration / 3600)).toFixed(2));
+  }
+  return result;
+}
+function parseTCX(text) {
+  var parser = new DOMParser();
+  var doc = parser.parseFromString(text, 'text/xml');
+  var result = {
+    sport: 'running', date: null, duration: 0, distance: 0,
+    calories: 0, hrAvg: null, hrMax: null, cadenceAvg: null,
+    elevation: null, speed: null, power: null
+  };
+  var activity = doc.querySelector('Activity');
+  if (!activity) return result;
+  // Sport mapping - completo con todos los deportes Garmin
+  var sport = (activity.getAttribute('Sport') || 'Running').toLowerCase();
+  var sportMap = {
+    'running': 'running', 'cycling': 'cycling', 'biking': 'cycling',
+    'swimming': 'swimming', 'walking': 'walking', 'hiking': 'hiking',
+    'other': 'other', 'fitness equipment': 'fitness_equipment',
+    'rowing': 'rowing', 'elliptical': 'elliptical', 'stair climbing': 'stair_climbing',
+    'yoga': 'yoga', 'strength training': 'strength_training',
+    'trail running': 'trail_running', 'mountain biking': 'mountain_biking',
+    'open water': 'open_water_swimming', 'paddling': 'paddling', 'golf': 'golf'
+  };
+  result.sport = sportMap[sport] || (sport.includes('run') ? 'running' : sport.includes('cycl') || sport.includes('bik') ? 'cycling' : 'other');
+  // Date from Activity Id or first trackpoint
+  var idEl = doc.querySelector('Id');
+  if (idEl) result.date = idEl.textContent.trim().split('T')[0];
+  // Get all laps
+  var laps = doc.querySelectorAll('Lap');
+  var totalDist = 0;
+  var totalTime = 0;
+  var totalCal = 0;
+  var hrVals = [];
+  var cadVals = [];
+  var altVals = [];
+  laps.forEach(function(lap) {
+    var lapTime = lap.querySelector('TotalTimeSeconds');
+    if (lapTime) totalTime += parseFloat(lapTime.textContent) || 0;
+    var lapDist = lap.querySelector('DistanceMeters');
+    if (lapDist) totalDist += parseFloat(lapDist.textContent) || 0;
+    var lapCal = lap.querySelector('Calories');
+    if (lapCal) totalCal += parseInt(lapCal.textContent) || 0;
+    // Trackpoints within this lap
+    lap.querySelectorAll('Trackpoint').forEach(function(tp) {
+      var hrEl = tp.querySelector('HeartRateBpm Value');
+      if (hrEl) {
+        var hr = parseInt(hrEl.textContent);
+        if (hr > 0 && hr < 250) hrVals.push(hr);
+      }
+      var cadEl = tp.querySelector('Cadence') || tp.querySelector('RunCadence');
+      if (!cadEl) {
+        // Try extensions namespace
+        var ext = tp.querySelector('Extensions');
+        if (ext) {
+          cadEl = ext.querySelector('RunCadence') || ext.querySelector('Cadence') || ext.querySelector('Watts');
+        }
+      }
+      if (cadEl && cadEl.tagName && !cadEl.tagName.toLowerCase().includes('watts')) {
+        var cad = parseInt(cadEl.textContent);
+        if (cad > 0 && cad < 250) cadVals.push(cad);
+      }
+      var altEl = tp.querySelector('AltitudeMeters');
+      if (altEl) altVals.push(parseFloat(altEl.textContent));
+    });
+  });
+  result.duration = Math.round(totalTime);
+  result.distance = parseFloat((totalDist / 1000).toFixed(2));
+  result.calories = totalCal;
+  if (hrVals.length) {
+    result.hrAvg = Math.round(hrVals.reduce(function(a,b){return a+b;},0)/hrVals.length);
+    result.hrMax = Math.max.apply(null, hrVals);
+  }
+  if (cadVals.length) {
+    result.cadenceAvg = Math.round(cadVals.reduce(function(a,b){return a+b;},0)/cadVals.length);
+  }
+  if (altVals.length > 1) {
+    var gain = 0;
+    for (var i = 1; i < altVals.length; i++) {
+      var diff = altVals[i] - altVals[i-1];
+      if (diff > 0.5) gain += diff;
     }
     result.elevation = Math.round(gain);
   }
@@ -798,77 +1039,132 @@ function parseFIT(buf) {
   }
   return result;
 }
-
-function parseTCX(text) {
-  var parser = new DOMParser();
-  var doc = parser.parseFromString(text, 'text/xml');
-  var result = { sport: 'running', date: null, duration: 0, distance: 0, calories: 0, hrAvg: null, hrMax: null, elevation: null, speed: null };
-  var activity = doc.querySelector('Activity');
-  if (!activity) return result;
-  var sport = activity.getAttribute('Sport') || 'Running';
-  var sportMap = { Running: 'running', Cycling: 'cycling', Biking: 'cycling', Swimming: 'swimming', Walking: 'walking', Hiking: 'hiking', Other: 'other' };
-  result.sport = sportMap[sport] || 'running';
-  var startTime = doc.querySelector('Id');
-  if (startTime) result.date = startTime.textContent.split('T')[0];
-  var totalTime = doc.querySelector('TotalTimeSeconds');
-  if (totalTime) result.duration = Math.round(parseFloat(totalTime.textContent));
-  var distM = doc.querySelector('DistanceMeters');
-  if (distM) result.distance = parseFloat((parseFloat(distM.textContent) / 1000).toFixed(2));
-  var cal = doc.querySelector('Calories');
-  if (cal) result.calories = parseInt(cal.textContent) || 0;
-  var hrVals = doc.querySelectorAll('HeartRateBpm Value');
-  if (hrVals.length) {
-    var hrs = Array.from(hrVals).map(function(h) { return parseInt(h.textContent); }).filter(function(h) { return h > 0 && h < 250; });
-    if (hrs.length) {
-      result.hrAvg = Math.round(hrs.reduce(function(a, b) { return a + b; }, 0) / hrs.length);
-      result.hrMax = Math.max.apply(null, hrs);
-    }
-  }
-  var altVals = doc.querySelectorAll('AltitudeMeters');
-  if (altVals.length > 1) {
-    var gain = 0;
-    var prev = parseFloat(altVals[0].textContent);
-    for (var ag = 1; ag < altVals.length; ag++) {
-      var cur = parseFloat(altVals[ag].textContent);
-      if (cur - prev > 0) gain += cur - prev;
-      prev = cur;
-    }
-    result.elevation = Math.round(gain);
-  }
-  if (result.distance > 0 && result.duration > 0) result.speed = parseFloat((result.distance / (result.duration / 3600)).toFixed(2));
-  return result;
-}
-
 function parseGPX(text) {
+  var result = {
+    sport: 'running', date: null, duration: 0, distance: 0,
+    calories: 0, hrAvg: null, hrMax: null, cadenceAvg: null,
+    elevation: null, speed: null, power: null
+  };
+  // DOMParser with namespace handling - Garmin uses gpxtpx: and gpxdata: namespaces
   var parser = new DOMParser();
   var doc = parser.parseFromString(text, 'text/xml');
-  var result = { sport: 'running', date: null, duration: 0, distance: 0, calories: 0, hrAvg: null, hrMax: null, elevation: null, speed: null };
-  var trkName = doc.querySelector('name');
-  var metaTime = doc.querySelector('metadata time') || doc.querySelector('time');
-  if (metaTime) result.date = metaTime.textContent.split('T')[0];
+  // Check parse error
+  if (doc.querySelector('parsererror')) {
+    // Try as HTML fallback
+    doc = parser.parseFromString(text, 'text/html');
+  }
+  // Sport from track type or name
+  var trkType = doc.querySelector('type');
+  if (trkType) {
+    var trkTypeTxt = trkType.textContent.trim().toLowerCase();
+    var typeMap = {
+      '1':'running', '9':'cycling', '5':'hiking', '11':'walking',
+      'running':'running', 'cycling':'cycling', 'swimming':'swimming',
+      'hiking':'hiking', 'walking':'walking', 'cycling_sport':'cycling',
+      'mountain_biking':'mountain_biking', 'trail_running':'trail_running',
+      'open_water':'open_water_swimming', 'rowing':'rowing',
+      'virtual_activity':'virtual_cycling', 'yoga':'yoga', 'other':'other'
+    };
+    result.sport = typeMap[trkTypeTxt] || result.sport;
+  }
+  // Date from metadata or first time element
+  var metaTime = doc.querySelector('metadata > time');
+  if (!metaTime) metaTime = doc.querySelector('time');
+  if (metaTime) result.date = metaTime.textContent.trim().split('T')[0];
+  // Get all trackpoints
   var trkpts = doc.querySelectorAll('trkpt');
+  if (!trkpts.length) {
+    // Try route points
+    trkpts = doc.querySelectorAll('rtept');
+  }
   if (!trkpts.length) return result;
   var coords = [];
   var hrVals = [];
+  var cadVals = [];
+  var pwrVals = [];
   var elevGain = 0;
   var prevElev = null;
   trkpts.forEach(function(pt) {
     var lat = parseFloat(pt.getAttribute('lat'));
     var lon = parseFloat(pt.getAttribute('lon'));
-    var elevEl = pt.querySelector('ele');
     var timeEl = pt.querySelector('time');
-    var hrEl = pt.querySelector('hr') || pt.querySelector('[localName="hr"]');
-    if (!isNaN(lat) && !isNaN(lon)) coords.push({ lat: lat, lon: lon, time: timeEl ? new Date(timeEl.textContent) : null });
-    if (elevEl) {
-      var elev = parseFloat(elevEl.textContent);
-      if (prevElev !== null && elev - prevElev > 0) elevGain += elev - prevElev;
-      prevElev = elev;
+    var t = timeEl ? new Date(timeEl.textContent.trim()) : null;
+    if (!isNaN(lat) && !isNaN(lon)) {
+      coords.push({ lat: lat, lon: lon, time: t });
     }
-    if (hrEl) {
-      var hr = parseInt(hrEl.textContent);
-      if (hr > 0 && hr < 250) hrVals.push(hr);
+    // Elevation
+    var eleEl = pt.querySelector('ele');
+    if (eleEl) {
+      var elev = parseFloat(eleEl.textContent);
+      if (!isNaN(elev)) {
+        if (prevElev !== null && elev - prevElev > 0.5) elevGain += elev - prevElev;
+        prevElev = elev;
+      }
+    }
+    // === HR from Garmin extensions ===
+    // Garmin GPX uses: <extensions><gpxtpx:TrackPointExtension><gpxtpx:hr>145</gpxtpx:hr>
+    // DOMParser with text/xml preserves namespace prefixes so we need getElementsByTagName with local name
+    var hrVal = null;
+    // Method 1: getElementsByTagNameNS (works if namespace is declared)
+    var hrEls = pt.getElementsByTagNameNS('http://www.garmin.com/xmlschemas/TrackPointExtension/v2', 'hr');
+    if (!hrEls || !hrEls.length) hrEls = pt.getElementsByTagNameNS('http://www.garmin.com/xmlschemas/TrackPointExtension/v1', 'hr');
+    if (hrEls && hrEls.length) hrVal = parseInt(hrEls[0].textContent);
+    // Method 2: Look for any element ending in :hr using getElementsByTagName wildcard
+    if (!hrVal) {
+      var allEls = pt.getElementsByTagName('*');
+      for (var ei = 0; ei < allEls.length; ei++) {
+        var ln = allEls[ei].localName || allEls[ei].tagName;
+        if (ln === 'hr' || ln.endsWith(':hr')) {
+          var v = parseInt(allEls[ei].textContent);
+          if (v > 0) { hrVal = v; break; }
+        }
+        if (ln === 'heartrate' || ln === 'HeartRate') {
+          var v = parseInt(allEls[ei].textContent);
+          if (v > 0) { hrVal = v; break; }
+        }
+      }
+    }
+    // Method 3: Regex on raw XML snippet
+    if (!hrVal) {
+      // Extract this trackpoint's XML to search with regex
+      var ser = new XMLSerializer().serializeToString(pt);
+      var hrMatch = ser.match(/<[^>]*:hr[^>]*>(\d+)<\/[^>]*:hr>/);
+      if (!hrMatch) hrMatch = ser.match(/<[Hh]eart[Rr]ate[^>]*>(\d+)<\/[Hh]eart[Rr]ate>/);
+      if (hrMatch) hrVal = parseInt(hrMatch[1]);
+    }
+    if (hrVal && hrVal > 0 && hrVal < 250) hrVals.push(hrVal);
+    // === Cadence ===
+    var cadVal = null;
+    var cadEls = pt.getElementsByTagNameNS('http://www.garmin.com/xmlschemas/TrackPointExtension/v2', 'cad');
+    if (!cadEls || !cadEls.length) cadEls = pt.getElementsByTagNameNS('http://www.garmin.com/xmlschemas/TrackPointExtension/v1', 'cad');
+    if (cadEls && cadEls.length) cadVal = parseInt(cadEls[0].textContent);
+    if (!cadVal) {
+      var allEls2 = pt.getElementsByTagName('*');
+      for (var ei2 = 0; ei2 < allEls2.length; ei2++) {
+        var ln2 = allEls2[ei2].localName || allEls2[ei2].tagName;
+        if (ln2 === 'cad' || ln2.endsWith(':cad') || ln2.toLowerCase() === 'cadence') {
+          var v2 = parseInt(allEls2[ei2].textContent);
+          if (v2 > 0 && v2 < 300) { cadVal = v2; break; }
+        }
+      }
+    }
+    if (!cadVal) {
+      var ser2 = new XMLSerializer().serializeToString(pt);
+      var cadMatch = ser2.match(/<[^>]*:cad[^>]*>(\d+)<\/[^>]*:cad>/);
+      if (!cadMatch) cadMatch = ser2.match(/<[Cc]adence[^>]*>(\d+)<\/[Cc]adence>/);
+      if (cadMatch) cadVal = parseInt(cadMatch[1]);
+    }
+    if (cadVal && cadVal > 0 && cadVal < 300) cadVals.push(cadVal);
+    // === Power (for cycling) ===
+    var ser3 = new XMLSerializer().serializeToString(pt);
+    var pwrMatch = ser3.match(/<[^>]*[Pp]ower[^>]*>(\d+)<\/[^>]*[Pp]ower>/);
+    if (!pwrMatch) pwrMatch = ser3.match(/<[Ww]atts[^>]*>(\d+)<\/[Ww]atts>/);
+    if (pwrMatch) {
+      var pwrVal = parseInt(pwrMatch[1]);
+      if (pwrVal > 0 && pwrVal < 3000) pwrVals.push(pwrVal);
     }
   });
+  // Calculate distance from GPS coordinates
   if (coords.length > 1) {
     var totalDist = 0;
     for (var ci = 1; ci < coords.length; ci++) {
@@ -881,14 +1177,17 @@ function parseGPX(text) {
     }
   }
   if (hrVals.length) {
-    result.hrAvg = Math.round(hrVals.reduce(function(a, b) { return a + b; }, 0) / hrVals.length);
+    result.hrAvg = Math.round(hrVals.reduce(function(a,b){return a+b;},0)/hrVals.length);
     result.hrMax = Math.max.apply(null, hrVals);
   }
+  if (cadVals.length) result.cadenceAvg = Math.round(cadVals.reduce(function(a,b){return a+b;},0)/cadVals.length);
+  if (pwrVals.length) result.power = Math.round(pwrVals.reduce(function(a,b){return a+b;},0)/pwrVals.length);
   if (elevGain > 0) result.elevation = Math.round(elevGain);
-  if (result.distance > 0 && result.duration > 0) result.speed = parseFloat((result.distance / (result.duration / 3600)).toFixed(2));
+  if (result.distance > 0 && result.duration > 0) {
+    result.speed = parseFloat((result.distance / (result.duration / 3600)).toFixed(2));
+  }
   return result;
 }
-
 function haversine(lat1, lon1, lat2, lon2) {
   var R = 6371;
   var dLat = (lat2 - lat1) * Math.PI / 180;
