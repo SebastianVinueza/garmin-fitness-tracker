@@ -173,7 +173,7 @@ async function loadDashboard() {
     var recent = acts.slice(0, 5);
     recentEl.innerHTML = recent.length ? recent.map(function(a) {
       var sc = getSportConfig(a.tipo_actividad);
-      return '<div class="strava-row" onclick="openDetail(' + JSON.stringify(a.id) + ')">' +
+      return '<div class="strava-row" onclick="openDetail(' + "'" + a.id + "'" + ')">' +
         '<div class="activity-sport-icon">' + sc.icon + '</div>' +
         '<div style="flex:1"><div class="activity-name">' + (a.nombre || 'Actividad') + '</div>' +
         '<div class="activity-meta"><span class="sport-badge" style="background:' + sc.color + '22;color:' + sc.color + '">' + sc.label + '</span>' +
@@ -274,7 +274,7 @@ async function loadActivities() {
     var pace = '';
     if (sc.unit === 'pace' && dist > 0 && dur > 0) pace = formatPace(dur / dist);
     else if (sc.unit === 'speed' && dist > 0 && dur > 0) pace = (dist / (dur / 3600)).toFixed(1) + ' km/h';
-    var idStr = JSON.stringify(a.id);
+    var idStr = "'" + a.id + "'";
     return '<div class="act-card">' +
       '<div class="act-card-top">' +
       '<div class="act-sport-icon" style="background:' + sc.color + '22;color:' + sc.color + '">' + sc.icon + '</div>' +
@@ -371,7 +371,7 @@ async function showActivityDetail(id) {
     '<div class="adv-metric"><span class="adv-metric-val">' + (elev > 0 ? Math.round(elev) + ' m' : '--') + '</span><span class="adv-metric-lbl">Elevacion</span></div>' +
     '</div></div>' +
     vo2Html + hrZonesHtml + projHtml + aiHtml +
-    '<div class="detail-actions"><button class="btn-delete-modal" onclick="deleteActivityFromDetail(' + JSON.stringify(id) + ')">🗑 Eliminar Actividad</button></div>' +
+    '<div class="detail-actions"><button class="btn-delete-modal" onclick="deleteActivityFromDetail(' + "'" + id + "'" + ')">🗑 Eliminar Actividad</button></div>' +
     '</div>';
 }
 
