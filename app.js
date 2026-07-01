@@ -1,49 +1,69 @@
-// GFT v4.0 - Strava-style UI + FIT parser + VO2Max + Projections + AI advice
+// GFT v5.0 - Garmin Fitness Tracker
+// Fixed: delete, view detail, duration parsing, corrupted code
+
 const SUPABASE_URL = 'https://snmqnbxmjiivjyeevugd.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNubXFuYnhtamlpdmp5ZWV2dWdkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI2OTI0MDcsImV4cCI6MjA5ODI2ODQwN30.mktcJueyphNdvnpxc6fNf8zYMJJqkpToOa5TVUP5E9g';
-let _db, currentUser = null, charts = {}, currentFile = null, parsedData = null;
+
+let _db;
+let currentUser = null;
+let charts = {};
+let currentFile = null;
+let parsedActivityData = null;
 
 document.addEventListener('DOMContentLoaded', async () => {
   _db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
   const { data: { session } } = await _db.auth.getSession();
   if (session) { currentUser = session.user; showMainApp(); }
-  else showAuthScreen();
-  _db.auth.onAuthStateChange((e, s) => {
-    if (s) { currentUser = s.user; showMainApp(); }
+  else { showAuthScreen(); }
+  _db.auth.onAuthStateChange((event, sess) => {
+    if (sess) { currentUser = sess.user; showMainApp(); }
     else { currentUser = null; showAuthScreen(); }
   });
-  const rpe = document.getElementById('activity-rpe');
-  if (rpe) rpe.addEventListener('input', () => document.getElementById('rpe-value').textContent = rpe.value);
-  document.getElementById('daily-date-picker').value = new Date().toISOString().split('T')[0];
+  const rpeSlider = document.getElementById('activity-rpe');
+  if (rpeSlider) rpeSlider.addEventListener('input', () => {
+    document.getElementById('rpe-value').textContent = rpeSlider.value;
+  });
+  const dp = document.getElementById('daily-date-picker');
+  if (dp) dp.value = new Date().toISOString().split('T')[0];
 });
 
+// ---- AUTH ----
 function showAuthTab(tab) {
   document.querySelectorAll('.auth-tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.auth-form').forEach(f => f.classList.add('hidden'));
   event.target.classList.add('active');
   document.getElementById(tab + '-form').classList.remove('hidden');
 }
+
 async function handleLogin(e) {
   e.preventDefault();
-  var msg = document.getElementById('auth-message');
-  msg.textContent = 'Iniciando...'; msg.className = 'message';
-  var { error } = await _db.auth.signInWithPassword({ email: document.getElementById('login-email').value, password: document.getElementById('login-password').value });
+  const email = document.getElementById('login-email').value;
+  const password = document.getElementById('login-password').value;
+  const msg = document.getElementById('auth-message');
+  msg.textContent = 'Iniciando sesion...'; msg.className = 'message';
+  const { error } = await _db.auth.signInWithPassword({ email, password });
   if (error) { msg.textContent = error.message; msg.className = 'message error'; }
 }
+
 async function handleRegister(e) {
   e.preventDefault();
-  var msg = document.getElementById('auth-message');
+  const email = document.getElementById('reg-email').value;
+  const password = document.getElementById('reg-password').value;
+  const msg = document.getElementById('auth-message');
   msg.textContent = 'Creando cuenta...'; msg.className = 'message';
-  var { error } = await _db.auth.signUp({ email: document.getElementById('reg-email').value, password: document.getElementById('reg-password').value });
+  const { error } = await _db.auth.signUp({ email, password });
   if (error) { msg.textContent = error.message; msg.className = 'message error'; }
-  else { msg.textContent = 'Revisa tu correo para confirmar.'; msg.className = 'message success'; }
+  else { msg.textContent = 'Cuenta creada. Revisa tu correo.'; msg.className = 'message success'; }
 }
+
 async function handleLogout() { await _db.auth.signOut(); }
+
 function showAuthScreen() {
-  document.getElementById('auth-screen').classList.remove('hidden','active');
+  document.getElementById('auth-screen').classList.remove('hidden');
   document.getElementById('auth-screen').classList.add('active');
   document.getElementById('main-app').classList.add('hidden');
 }
+
 async function showMainApp() {
   document.getElementById('auth-screen').classList.add('hidden');
   document.getElementById('main-app').classList.remove('hidden');
@@ -51,558 +71,864 @@ async function showMainApp() {
   await loadProfile();
   await loadDashboard();
 }
+
+// ---- NAV ----
 function showPage(page) {
   document.querySelectorAll('.page').forEach(p => { p.classList.add('hidden'); p.classList.remove('active'); });
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-  var el = document.getElementById('page-' + page);
-  if (el) { el.classList.remove('hidden'); el.classList.add('active'); }
-  document.getElementById('page-title').textContent = { dashboard:'Dashboard', activities:'Actividades', daily:'Metricas Diarias', records:'Records', plans:'Planes', profile:'Perfil' }[page] || page;
-  event.currentTarget.classList.add('active');
+  const pageEl = document.getElementById('page-' + page);
+  if (pageEl) { pageEl.classList.remove('hidden'); pageEl.classList.add('active'); }
+  const titles = {dashboard:'Dashboard',activities:'Actividades',daily:'Metricas Diarias',records:'Records Personales',plans:'Planes de Entrenamiento',profile:'Mi Perfil'};
+  const titleEl = document.getElementById('page-title');
+  if (titleEl) titleEl.textContent = titles[page] || page;
+  if (event && event.currentTarget) event.currentTarget.classList.add('active');
   if (page === 'activities') loadActivities();
   if (page === 'daily') loadDailyMetrics();
   if (page === 'records') loadRecords();
   if (page === 'plans') loadPlans();
   if (page === 'profile') loadProfilePage();
 }
+
 function toggleSidebar() { document.querySelector('.sidebar').classList.toggle('open'); }
 
+// ---- DASHBOARD ----
 async function loadDashboard() {
   if (!currentUser) return;
-  var { data: acts } = await _db.from('activities').select('*').eq('user_id', currentUser.id).order('fecha_inicio', { ascending: false });
-  if (!acts) acts = [];
-  var totalDist = acts.reduce(function(s,a){ return s+(a.distancia_metros||0); }, 0)/1000;
-  var totalCal = acts.reduce(function(s,a){ return s+(a.calorias||0); }, 0);
-  var totalTime = acts.reduce(function(s,a){ return s+(a.duracion_segundos||0); }, 0);
-  document.getElementById('total-activities').textContent = acts.length;
-  document.getElementById('total-distance').textContent = totalDist.toFixed(1) + ' km';
-  document.getElementById('total-calories').textContent = totalCal.toLocaleString();
-  document.getElementById('total-time').textContent = formatDuration(totalTime, true);
-  var rl = document.getElementById('recent-list');
-  if (!acts.length) { rl.innerHTML = '<div class="empty-state"><p>No hay actividades aun</p></div>'; }
-  else {
-    rl.innerHTML = acts.slice(0,5).map(function(a) {
-      var dist = ((a.distancia_metros||0)/1000).toFixed(2);
-      var dur = formatDuration(a.duracion_segundos);
-      var icon = sportIcon(a.tipo_actividad);
-      return '<div class="activity-row strava-row" onclick="openActivityDetail(' + JSON.stringify(a.id) + ')">' +
-        '<div class="activity-sport-icon">' + icon + '</div>' +
-        '<div class="activity-info"><div class="activity-name">' + (a.nombre||'Sin nombre') + '</div>' +
-        '<div class="activity-meta"><span>' + formatDate(a.fecha_inicio) + '</span><span class="sport-badge">' + (a.tipo_actividad||'general') + '</span></div></div>' +
-        '<div class="activity-stats"><span class="stat-pill">' + dist + ' km</span><span class="stat-pill">' + dur + '</span>' +
-        (a.frecuencia_cardiaca_promedio ? '<span class="stat-pill heart">' + a.frecuencia_cardiaca_promedio + ' bpm</span>' : '') +
-        '</div></div>';
-    }).join('');
+  const { data: activities } = await _db.from('activities').select('*')
+    .eq('user_id', currentUser.id).order('fecha_inicio', { ascending: false });
+  if (!activities) return;
+  const totalDist = activities.reduce((s,a) => s + (a.distancia_metros||0), 0) / 1000;
+  const totalCal = activities.reduce((s,a) => s + (a.calorias||0), 0);
+  const totalTime = activities.reduce((s,a) => s + (a.duracion_segundos||0), 0);
+  const elTotalActs = document.getElementById('total-activities');
+  const elTotalDist = document.getElementById('total-distance');
+  const elTotalCal = document.getElementById('total-calories');
+  const elTotalTime = document.getElementById('total-time');
+  if (elTotalActs) elTotalActs.textContent = activities.length;
+  if (elTotalDist) elTotalDist.textContent = totalDist.toFixed(1) + ' km';
+  if (elTotalCal) elTotalCal.textContent = totalCal.toLocaleString();
+  if (elTotalTime) elTotalTime.textContent = formatDuration(totalTime, true);
+  const recentList = document.getElementById('recent-list');
+  if (recentList) {
+    if (activities.length === 0) {
+      recentList.innerHTML = '<div class="empty-state"><p>Sube tu primera actividad</p></div>';
+    } else {
+      recentList.innerHTML = activities.slice(0,5).map(function(a) {
+        var parts = [];
+        parts.push('<div class="activity-row" onclick="showActivityDetail(' + JSON.stringify(String(a.id)) + ')">');
+        parts.push('<div class="activity-sport-icon">' + sportIcon(a.tipo_actividad) + '</div>');
+        parts.push('<div class="activity-info">');
+        parts.push('<div class="activity-name">' + (a.nombre||'Sin nombre') + '</div>');
+        parts.push('<div class="activity-meta"><span>' + formatDate(a.fecha_inicio) + '</span> &bull; <span>' + (a.tipo_actividad||'Actividad') + '</span></div>');
+        parts.push('</div><div class="activity-stats">');
+        parts.push('<span>' + ((a.distancia_metros||0)/1000).toFixed(2) + ' km</span>');
+        parts.push('<span>' + formatDuration(a.duracion_segundos) + '</span>');
+        parts.push('</div></div>');
+        return parts.join('');
+      }).join('');
+    }
   }
-  renderWeeklyChart(acts);
-  renderSportChart(acts);
+  renderWeeklyChart(activities);
+  renderSportChart(activities);
 }
 
-function renderWeeklyChart(acts) {
-  var ctx = document.getElementById('weekly-chart');
+function renderWeeklyChart(activities) {
+  const ctx = document.getElementById('weekly-chart');
   if (!ctx) return;
   if (charts.weekly) charts.weekly.destroy();
-  var weeks = {};
-  acts.forEach(function(a) { var w = getWeekKey(new Date(a.fecha_inicio)); weeks[w] = (weeks[w]||0)+1; });
-  var labels = Object.keys(weeks).slice(-8);
-  charts.weekly = new Chart(ctx, {
-    type:'bar', data:{ labels:labels.map(function(l){return 'Sem '+l.split('-W')[1];}),
-    datasets:[{label:'Actividades',data:labels.map(function(k){return weeks[k];}),backgroundColor:'rgba(252,76,2,0.8)',borderRadius:4}]},
-    options:{responsive:true,plugins:{legend:{display:false}},scales:{x:{grid:{color:'rgba(255,255,255,0.1)'},ticks:{color:'#aaa'}},y:{grid:{color:'rgba(255,255,255,0.1)'},ticks:{color:'#aaa',stepSize:1}}}}
+  const weeks = {};
+  activities.forEach(a => {
+    const d = new Date(a.fecha_inicio);
+    const wk = getWeekKey(d);
+    weeks[wk] = (weeks[wk] || 0) + 1;
   });
-}
-function renderSportChart(acts) {
-  var ctx = document.getElementById('sport-chart');
-  if (!ctx) return;
-  if (charts.sport) charts.sport.destroy();
-  var sports = {};
-  acts.forEach(function(a){ var s=a.tipo_actividad||'other'; sports[s]=(sports[s]||0)+1; });
-  charts.sport = new Chart(ctx, {
-    type:'doughnut', data:{ labels:Object.keys(sports).map(function(l){return l.charAt(0).toUpperCase()+l.slice(1);}),
-    datasets:[{data:Object.values(sports),backgroundColor:['#FC4C02','#E8691C','#FF6B35','#FF8C42','#FFA05A','#FFB97A']}]},
-    options:{responsive:true,plugins:{legend:{labels:{color:'#ccc',padding:10}}}}
+  const labels = Object.keys(weeks).slice(-8);
+  const data = labels.map(k => weeks[k]);
+  charts.weekly = new Chart(ctx, {
+    type: 'bar',
+    data: { labels: labels.map(l => 'Sem ' + l.split('-W')[1]), datasets: [{ label: 'Actividades', data, backgroundColor: 'rgba(252,76,2,0.7)', borderRadius: 6 }] },
+    options: { responsive: true, plugins: { legend: { display: false } }, scales: { x: { grid: { color: '#334155' }, ticks: { color: '#94A3B8' } }, y: { grid: { color: '#334155' }, ticks: { color: '#94A3B8', stepSize: 1 } } } }
   });
 }
 
+function renderSportChart(activities) {
+  const ctx = document.getElementById('sport-chart');
+  if (!ctx) return;
+  if (charts.sport) charts.sport.destroy();
+  const sports = {};
+  activities.forEach(a => { const s = a.tipo_actividad||'other'; sports[s] = (sports[s]||0) + 1; });
+  charts.sport = new Chart(ctx, {
+    type: 'doughnut',
+    data: { labels: Object.keys(sports).map(l => l.charAt(0).toUpperCase()+l.slice(1)), datasets: [{ data: Object.values(sports), backgroundColor: ['#FC4C02','#10B981','#F59E0B','#8B5CF6','#EF4444','#00B4D8'] }] },
+    options: { responsive: true, plugins: { legend: { labels: { color: '#94A3B8', padding: 12 } } } }
+  });
+}
+
+// ---- ACTIVITIES ----
 async function loadActivities() {
   if (!currentUser) return;
-  var sport = document.getElementById('filter-sport')&&document.getElementById('filter-sport').value;
-  var from = document.getElementById('filter-date-from')&&document.getElementById('filter-date-from').value;
-  var to = document.getElementById('filter-date-to')&&document.getElementById('filter-date-to').value;
-  var list = document.getElementById('activities-list');
+  const sportEl = document.getElementById('filter-sport');
+  const fromEl = document.getElementById('filter-date-from');
+  const toEl = document.getElementById('filter-date-to');
+  const sport = sportEl ? sportEl.value : '';
+  const from = fromEl ? fromEl.value : '';
+  const to = toEl ? toEl.value : '';
+  const list = document.getElementById('activities-list');
+  if (!list) return;
   list.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
-  var query = _db.from('activities').select('*').eq('user_id', currentUser.id).order('fecha_inicio', {ascending:false});
+  let query = _db.from('activities').select('*').eq('user_id', currentUser.id).order('fecha_inicio', { ascending: false });
   if (sport) query = query.eq('tipo_actividad', sport);
   if (from) query = query.gte('fecha_inicio', from);
-  if (to) query = query.lte('fecha_inicio', to+'T23:59:59');
-  var { data, error } = await query;
-  if (error || !data || !data.length) {
-    list.innerHTML = '<div class="empty-state"><div class="empty-icon">&#127939;</div><p>No hay actividades. Sube tu primera!</p></div>';
+  if (to) query = query.lte('fecha_inicio', to + 'T23:59:59');
+  const { data, error } = await query;
+  if (error || !data || data.length === 0) {
+    list.innerHTML = '<div class="empty-state"><div class="empty-icon">🏃</div><p>No hay actividades. Sube tu primera!</p></div>';
     return;
   }
   list.innerHTML = data.map(function(a) {
+    var id = String(a.id);
     var dist = ((a.distancia_metros||0)/1000).toFixed(2);
     var dur = formatDuration(a.duracion_segundos);
-    var pace = a.pace_promedio_seg_km ? formatPace(a.pace_promedio_seg_km)+'/km' : '';
-    var spd = a.velocidad_maxima_ms ? ((a.distancia_metros||0)/1000/(a.duracion_segundos||1)*3600).toFixed(1)+' km/h' : '';
-    var isCycling = a.tipo_actividad==='cycling';
-    return '<div class="strava-activity-card">' +
-      '<div class="sac-header"><div class="sac-sport-icon">' + sportIcon(a.tipo_actividad) + '</div>' +
-      '<div class="sac-title-area"><div class="sac-name">' + (a.nombre||'Actividad') + '</div>' +
-      '<div class="sac-meta">' + formatDate(a.fecha_inicio) + ' &bull; <span class="sac-type">' + (a.tipo_actividad||'general') + '</span></div></div>' +
-      '<div class="sac-actions"><button class="btn-detail" onclick="openActivityDetail(' + JSON.stringify(a.id) + ')">Ver</button>' +
-      '<button class="btn-delete" onclick="deleteActivity(' + JSON.stringify(a.id) + ', event)">&#128465;</button></div></div>' +
-      '<div class="sac-stats">' +
-      '<div class="sac-stat"><div class="sac-stat-val">' + dist + '</div><div class="sac-stat-lbl">km</div></div>' +
-      '<div class="sac-stat"><div class="sac-stat-val">' + dur + '</div><div class="sac-stat-lbl">Tiempo</div></div>' +
-      (a.frecuencia_cardiaca_promedio ? '<div class="sac-stat"><div class="sac-stat-val">' + a.frecuencia_cardiaca_promedio + '</div><div class="sac-stat-lbl">bpm avg</div></div>' : '') +
-      (isCycling ? '<div class="sac-stat"><div class="sac-stat-val">' + spd + '</div><div class="sac-stat-lbl">Velocidad</div></div>' : '') +
-      (!isCycling && pace ? '<div class="sac-stat"><div class="sac-stat-val">' + pace + '</div><div class="sac-stat-lbl">Ritmo</div></div>' : '') +
-      (a.calorias ? '<div class="sac-stat"><div class="sac-stat-val">' + a.calorias + '</div><div class="sac-stat-lbl">kcal</div></div>' : '') +
-      '</div></div>';
+    var fc = a.frecuencia_cardiaca_promedio || '--';
+    var kcal = a.calorias || '--';
+    var badge = '<span class="sport-badge ' + (a.tipo_actividad||'other') + '">' + (a.tipo_actividad||'Actividad') + '</span>';
+    var parts = [];
+    parts.push('<div class="activity-card">');
+    parts.push('<div class="activity-card-header">');
+    parts.push('<div class="activity-sport-icon">' + sportIcon(a.tipo_actividad) + '</div>');
+    parts.push('<div class="activity-info" onclick="showActivityDetail(' + JSON.stringify(id) + ')" style="cursor:pointer;flex:1;">');
+    parts.push('<div class="activity-name">' + (a.nombre||'Actividad sin nombre') + '</div>');
+    parts.push('<div class="activity-meta">' + formatDate(a.fecha_inicio) + ' &bull; ' + badge + '</div>');
+    parts.push('</div>');
+    parts.push('<div class="activity-actions">');
+    parts.push('<button class="btn-view" onclick="showActivityDetail(' + JSON.stringify(id) + ')">Ver</button>');
+    parts.push('<button class="btn-delete" onclick="deleteActivity(' + JSON.stringify(id) + ');event.stopPropagation();">🗑</button>');
+    parts.push('</div></div>');
+    parts.push('<div class="activity-card-stats">');
+    parts.push('<div class="act-stat"><div class="act-stat-value">' + dist + '</div><div class="act-stat-label">km</div></div>');
+    parts.push('<div class="act-stat"><div class="act-stat-value">' + dur + '</div><div class="act-stat-label">Tiempo</div></div>');
+    parts.push('<div class="act-stat"><div class="act-stat-value">' + fc + '</div><div class="act-stat-label">bpm avg</div></div>');
+    if (a.tipo_actividad === 'cycling') {
+      var spd = a.velocidad_maxima_ms ? (a.velocidad_maxima_ms * 3.6).toFixed(1) + ' km/h' : '--';
+      parts.push('<div class="act-stat"><div class="act-stat-value">' + spd + '</div><div class="act-stat-label">Velocidad</div></div>');
+    } else {
+      var pace = a.pace_promedio_seg_km ? formatPace(a.pace_promedio_seg_km) + '/km' : '--';
+      parts.push('<div class="act-stat"><div class="act-stat-value">' + pace + '</div><div class="act-stat-label">Ritmo</div></div>');
+    }
+    parts.push('<div class="act-stat"><div class="act-stat-value">' + kcal + '</div><div class="act-stat-label">kcal</div></div>');
+    parts.push('</div></div>');
+    return parts.join('');
   }).join('');
 }
 
-async function deleteActivity(id, ev) {
-  if (ev) ev.stopPropagation();
-  if (!confirm('Eliminar esta actividad?')) return;
-  var { error } = await _db.from('activities').delete().eq('id', id);
-  if (!error) { showToast('Actividad eliminada', 'success'); loadActivities(); loadDashboard(); }
-  else showToast('Error: ' + error.message, 'error');
-}
-
-async function openActivityDetail(id) {
-  var { data: a } = await _db.from('activities').select('*').eq('id', id).single();
-  if (!a) return;
-  var modal = document.getElementById('activity-detail-modal');
-  document.getElementById('detail-title').textContent = (a.nombre || 'Actividad') + ' - ' + (a.tipo_actividad||'');
-  var isCyc = a.tipo_actividad === 'cycling';
-  var isRun = a.tipo_actividad === 'running';
-  var dist_km = (a.distancia_metros||0)/1000;
-  var dur_s = a.duracion_segundos || 0;
-  var avg_spd = dur_s>0 ? (dist_km/(dur_s/3600)) : 0;
-  var pace = a.pace_promedio_seg_km || (dist_km>0&&dur_s>0 ? Math.round(dur_s/dist_km) : 0);
+// ---- ACTIVITY DETAIL ----
+async function showActivityDetail(id) {
+  if (!_db || !id) return;
+  const { data: a, error } = await _db.from('activities').select('*').eq('id', id).single();
+  if (error || !a) { showToast('Error cargando actividad', 'error'); return; }
+  window._currentDetailId = id;
+  const modal = document.getElementById('activity-detail-modal');
+  const titleEl = document.getElementById('detail-title');
+  if (titleEl) titleEl.textContent = a.nombre || 'Detalle de Actividad';
+  
+  const dist = ((a.distancia_metros||0)/1000).toFixed(2);
+  const dur = formatDuration(a.duracion_segundos);
+  const pace = a.pace_promedio_seg_km ? formatPace(a.pace_promedio_seg_km) : '--';
+  const elev = a.elevacion_ganada_m ? a.elevacion_ganada_m.toFixed(0) + ' m' : '--';
+  const isCycling = (a.tipo_actividad === 'cycling');
+  
   var vo2 = calcVO2Max(a);
-  var ai = generateAIAdvice(a);
-  var projections = isRun ? buildRunProjections(a) : (isCyc ? buildCyclingProjections(a) : '');
-
-  var html = '<div class="detail-strava">';
-  // Header stats row (Strava style)
-  html += '<div class="detail-main-stats">';
-  html += makeStatBlock(dist_km.toFixed(2) + ' km', 'Distancia');
-  html += makeStatBlock(formatDuration(dur_s), 'Tiempo');
-  if (isCyc) html += makeStatBlock(avg_spd.toFixed(1) + ' km/h', 'Velocidad media');
-  if (isRun && pace) html += makeStatBlock(formatPace(pace) + '/km', 'Ritmo medio');
-  if (a.elevacion_ganada_m) html += makeStatBlock(a.elevacion_ganada_m.toFixed(0)+' m', 'Desnivel');
-  if (a.calorias) html += makeStatBlock(a.calorias, 'Calorias');
-  html += '</div>';
-
-  // Secondary stats
-  html += '<div class="detail-table"><table><thead><tr><th></th><th>Promedio</th><th>Maximo</th></tr></thead><tbody>';
-  if (a.frecuencia_cardiaca_promedio||a.frecuencia_cardiaca_maxima) {
-    html += '<tr><td>Ritmo cardiaco</td><td>' + (a.frecuencia_cardiaca_promedio||'--') + ' bpm</td><td>' + (a.frecuencia_cardiaca_maxima||'--') + ' bpm</td></tr>';
-  }
-  if (a.cadencia_promedio) html += '<tr><td>Cadencia</td><td>' + a.cadencia_promedio + (isRun?' spm':' rpm') + '</td><td>--</td></tr>';
-  if (isCyc) {
-    html += '<tr><td>Velocidad</td><td>' + avg_spd.toFixed(1) + ' km/h</td><td>' + (a.velocidad_maxima_ms ? (a.velocidad_maxima_ms*3.6).toFixed(1)+' km/h' : '--') + '</td></tr>';
-  }
-  if (a.training_stress_score) html += '<tr><td>Training Stress Score</td><td>' + a.training_stress_score + '</td><td>--</td></tr>';
-  html += '</tbody></table></div>';
-
-  // VO2Max
+  var vo2html = '';
   if (vo2) {
-    html += '<div class="detail-section"><h4>&#128170; VO2 Max estimado</h4>';
-    html += '<div class="vo2-block"><span class="vo2-value">' + vo2.value + '</span><span class="vo2-unit">ml/kg/min</span>';
-    html += '<span class="vo2-cat ' + vo2.catClass + '">' + vo2.category + '</span></div>';
-    html += '<p class="vo2-desc">' + vo2.desc + '</p></div>';
+    var cat = vo2 >= 55 ? 'Excelente' : vo2 >= 47 ? 'Bueno' : vo2 >= 42 ? 'Promedio' : 'Bajo';
+    vo2html = '<div class="detail-section"><h4>VO2 Max Estimado</h4><div class="vo2-display"><span class="vo2-value">' + vo2.toFixed(1) + '</span><span class="vo2-unit">ml/kg/min</span><span class="vo2-cat">' + cat + '</span></div></div>';
   }
+  
+  var projHtml = '';
+  if (!isCycling && a.duracion_segundos > 0 && a.distancia_metros > 500) {
+    projHtml = buildRunProjections(a);
+  } else if (isCycling && a.duracion_segundos > 0) {
+    projHtml = buildCyclingProjections(a);
+  }
+  
+  var aiHtml = '<div class="detail-section"><h4>Analisis IA</h4><div class="ai-advice">' + generateAIAdvice(a) + '</div></div>';
 
-  // AI Advice
-  html += '<div class="detail-section ai-section"><h4>&#129302; Analisis IA de tu actividad</h4><div class="ai-advice">' + ai + '</div></div>';
-
-  // Projections
-  if (projections) html += '<div class="detail-section"><h4>&#128200; Proyecciones</h4>' + projections + '</div>';
-
-  // Delete button - store id globally for safe onclick
-  window._cDetailId = String(id);
-  html += '<div class="detail-actions"><button class="btn-delete-detail" onclick="deleteActivity(window._cDetailId); closeModal(\"activity-detail-modal\");">&#128465; Eliminar actividad</button></div>';
+  var html = '<div class="detail-stats-grid">';
+  html += '<div class="detail-stat"><div class="detail-stat-label">Distancia</div><div class="detail-stat-value">' + dist + ' km</div></div>';
+  html += '<div class="detail-stat"><div class="detail-stat-label">Tiempo</div><div class="detail-stat-value">' + dur + '</div></div>';
+  if (isCycling) {
+    var spd = a.velocidad_maxima_ms ? (a.velocidad_maxima_ms*3.6).toFixed(1) + ' km/h' : '--';
+    html += '<div class="detail-stat"><div class="detail-stat-label">Vel. Max</div><div class="detail-stat-value">' + spd + '</div></div>';
+  } else {
+    html += '<div class="detail-stat"><div class="detail-stat-label">Ritmo Avg</div><div class="detail-stat-value">' + pace + '/km</div></div>';
+  }
+  html += '<div class="detail-stat"><div class="detail-stat-label">FC Media</div><div class="detail-stat-value">' + (a.frecuencia_cardiaca_promedio||'--') + ' bpm</div></div>';
+  html += '<div class="detail-stat"><div class="detail-stat-label">FC Max</div><div class="detail-stat-value">' + (a.frecuencia_cardiaca_maxima||'--') + ' bpm</div></div>';
+  html += '<div class="detail-stat"><div class="detail-stat-label">Calorias</div><div class="detail-stat-value">' + (a.calorias||'--') + ' kcal</div></div>';
+  html += '<div class="detail-stat"><div class="detail-stat-label">Cadencia</div><div class="detail-stat-value">' + (a.cadencia_promedio||'--') + ' spm</div></div>';
+  html += '<div class="detail-stat"><div class="detail-stat-label">Elevacion</div><div class="detail-stat-value">' + elev + '</div></div>';
+  html += '</div>';
+  html += vo2html;
+  html += projHtml;
+  html += aiHtml;
+  html += '<div style="display:flex;gap:10px;margin-top:16px;">';
+  html += '<button class="btn-secondary" style="flex:1;" onclick="closeModal('activity-detail-modal')">Cerrar</button>';
+  html += '<button class="btn-danger" style="flex:1;" onclick="deleteActivityFromDetail()">Eliminar Actividad</button>';
   html += '</div>';
 
-  document.getElementById('activity-detail-content').innerHTML = html;
-  modal.classList.remove('hidden');
+  const content = document.getElementById('activity-detail-content');
+  if (content) content.innerHTML = html;
+  if (modal) modal.classList.remove('hidden');
 }
 
-function makeStatBlock(val, lbl) {
-  return '<div class="detail-stat-block"><div class="dsb-val">' + val + '</div><div class="dsb-lbl">' + lbl + '</div></div>';
+function deleteActivityFromDetail() {
+  var id = window._currentDetailId;
+  if (!id) return;
+  deleteActivity(id, true);
 }
 
-// VO2Max calculation
-function calcVO2Max(a) {
-  var dist_km = (a.distancia_metros||0)/1000;
-  var dur_min = (a.duracion_segundos||0)/60;
-  if (dist_km < 1 || dur_min < 5) return null;
-  var pace_min_km = dur_min / dist_km;
-  // Jack Daniels formula: VO2 = -4.60 + 0.182258*(km/min) + 0.000104*(km/min)^2
-  // Using simplified: VO2Max = 15 * (HRmax/HRrest) if we have HR
-  var vo2;
-  if (a.frecuencia_cardiaca_promedio && a.frecuencia_cardiaca_maxima) {
-    // Uth-Sorensen formula
-    var hrr = a.frecuencia_cardiaca_maxima / a.frecuencia_cardiaca_promedio;
-    vo2 = 15.3 * hrr;
-  } else if (a.tipo_actividad === 'running') {
-    // Riegel/Daniels from pace
-    var spd_m_min = dist_km * 1000 / dur_min;
-    var pct = (-0.0004 * spd_m_min * spd_m_min + 0.4295 * spd_m_min - 4.604);
-    var oxy = (0.000104 * spd_m_min * spd_m_min + 0.182258 * spd_m_min - 4.604);
-    if (oxy > 0) vo2 = oxy / 0.8; else vo2 = null;
+async function deleteActivity(id, fromDetail) {
+  if (!confirm('Eliminar esta actividad permanentemente?')) return;
+  const { error } = await _db.from('activities').delete().eq('id', id);
+  if (!error) {
+    closeModal('activity-detail-modal');
+    loadActivities();
+    loadDashboard();
+    showToast('Actividad eliminada', 'success');
   } else {
-    return null;
+    showToast('Error al eliminar: ' + error.message, 'error');
   }
-  if (!vo2 || vo2 < 20 || vo2 > 90) return null;
-  vo2 = Math.round(vo2 * 10) / 10;
-  var cat, catClass, desc;
-  if (vo2 >= 60) { cat='Excelente'; catClass='vo2-excellent'; desc='Nivel de atleta de elite. Capacidad cardiovascular excepcional.'; }
-  else if (vo2 >= 50) { cat='Muy bueno'; catClass='vo2-great'; desc='Por encima del promedio. Muy buena forma fisica.'; }
-  else if (vo2 >= 40) { cat='Bueno'; catClass='vo2-good'; desc='Nivel saludable. Puedes mejorar con entrenamiento constante.'; }
-  else if (vo2 >= 30) { cat='Promedio'; catClass='vo2-avg'; desc='Nivel aceptable. Con entrenamiento de Z2 puedes mejorar significativamente.'; }
-  else { cat='Por mejorar'; catClass='vo2-low'; desc='Aumenta la frecuencia de entrenamientos aerobicos de baja intensidad.'; }
-  return { value: vo2, category: cat, catClass: catClass, desc: desc };
 }
 
-// AI Advice generator
+// ---- VO2MAX ----
+function calcVO2Max(a) {
+  if (a.frecuencia_cardiaca_promedio && a.frecuencia_cardiaca_maxima && a.distancia_metros > 1000) {
+    var hrRatio = a.frecuencia_cardiaca_promedio / a.frecuencia_cardiaca_maxima;
+    return 15 * (a.frecuencia_cardiaca_maxima / a.frecuencia_cardiaca_promedio);
+  }
+  if (a.duracion_segundos > 0 && a.distancia_metros > 1000) {
+    var paceSecKm = a.duracion_segundos / (a.distancia_metros / 1000);
+    var speedMMin = 1000 / paceSecKm;
+    return (29.54 + 5.000663 * speedMMin - 0.007546 * speedMMin * speedMMin);
+  }
+  return null;
+}
+
+// ---- RUN PROJECTIONS ----
+function buildRunProjections(a) {
+  if (!a.duracion_segundos || !a.distancia_metros || a.distancia_metros < 500) return '';
+  var t1 = a.duracion_segundos;
+  var d1 = a.distancia_metros;
+  var races = [{name:'5 km',d:5000},{name:'10 km',d:10000},{name:'15 km',d:15000},{name:'Media Maraton',d:21097},{name:'Maraton',d:42195}];
+  var html = '<div class="detail-section"><h4>Proyecciones de Carrera (Riegel)</h4><div class="projections-grid">';
+  races.forEach(function(r) {
+    var t2 = t1 * Math.pow(r.d / d1, 1.06);
+    var h = Math.floor(t2/3600), m = Math.floor((t2%3600)/60), s = Math.round(t2%60);
+    var timeStr = h > 0 ? h + ':' + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0') : String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+    var paceS = t2 / (r.d/1000);
+    var pm = Math.floor(paceS/60), ps = Math.round(paceS%60);
+    html += '<div class="proj-item"><div class="proj-name">' + r.name + '</div><div class="proj-time">' + timeStr + '</div><div class="proj-pace">' + pm + ':' + String(ps).padStart(2,'0') + '/km</div></div>';
+  });
+  html += '</div></div>';
+  return html;
+}
+
+// ---- CYCLING PROJECTIONS ----
+function buildCyclingProjections(a) {
+  if (!a.duracion_segundos || !a.distancia_metros || a.distancia_metros < 1000) return '';
+  var t1 = a.duracion_segundos;
+  var d1 = a.distancia_metros;
+  var routes = [{name:'50 km',d:50000},{name:'100 km',d:100000},{name:'160 km',d:160000},{name:'200 km',d:200000}];
+  var html = '<div class="detail-section"><h4>Proyecciones Ciclismo</h4><div class="projections-grid">';
+  routes.forEach(function(r) {
+    var fatigue = 1 + (r.d/d1 - 1) * 0.08;
+    var t2 = t1 * (r.d/d1) * fatigue;
+    var h = Math.floor(t2/3600), m = Math.floor((t2%3600)/60);
+    var timeStr = h + ':' + String(m).padStart(2,'0') + ' h';
+    var speedKmh = (r.d/1000) / (t2/3600);
+    html += '<div class="proj-item"><div class="proj-name">' + r.name + '</div><div class="proj-time">' + timeStr + '</div><div class="proj-pace">' + speedKmh.toFixed(1) + ' km/h</div></div>';
+  });
+  html += '</div></div>';
+  return html;
+}
+
+// ---- AI ADVICE ----
 function generateAIAdvice(a) {
   var tips = [];
-  var dist_km = (a.distancia_metros||0)/1000;
-  var dur_min = (a.duracion_segundos||0)/60;
-  var avg_hr = a.frecuencia_cardiaca_promedio;
-  var max_hr = a.frecuencia_cardiaca_maxima;
-  var pace = a.pace_promedio_seg_km;
-  var isCyc = a.tipo_actividad==='cycling';
-  var isRun = a.tipo_actividad==='running';
-  var rpe = a.percepcion_esfuerzo || 5;
+  var dur = a.duracion_segundos || 0;
+  var dist = (a.distancia_metros||0)/1000;
+  var avgHr = a.frecuencia_cardiaca_promedio || 0;
+  var maxHr = a.frecuencia_cardiaca_maxima || 200;
+  var isCycling = a.tipo_actividad === 'cycling';
 
-  // Performance assessment
-  if (dist_km > 10 && isRun) tips.push('<li><b>&#9989; Gran volumen:</b> Corriste ' + dist_km.toFixed(1) + ' km. Excelente para construir base aerobica.</li>');
-  else if (dist_km > 30 && isCyc) tips.push('<li><b>&#9989; Buen volumen en bici:</b> ' + dist_km.toFixed(1) + ' km es una sesion solida de resistencia.</li>');
-
-  // Heart rate zones
-  if (avg_hr && max_hr) {
-    var hrp = Math.round(avg_hr/max_hr*100);
-    if (hrp < 65) tips.push('<li><b>&#128153; Zona 1-2 (Recuperacion/Base):</b> FC media al ' + hrp + '% del max. Ideal para entrenamiento de base aerobica y recuperacion activa.</li>');
-    else if (hrp < 75) tips.push('<li><b>&#128154; Zona 2-3 (Aerobico):</b> FC al ' + hrp + '% del max. La zona ideal para mejorar el motor aerobico. Bien hecho!</li>');
-    else if (hrp < 85) tips.push('<li><b>&#128161; Zona 3-4 (Umbral):</b> FC al ' + hrp + '% del max. Entrenamiento exigente. Asegurate de recuperar bien.</li>');
-    else tips.push('<li><b>&#128308; Zona 5 (Maximo):</b> FC al ' + hrp + '% del max. Esfuerzo muy alto. Necesitas 48h de recuperacion.</li>');
+  if (dur > 0 && dist > 0) {
+    if (!isCycling) {
+      var paceMin = (dur/60) / dist;
+      if (paceMin < 4) tips.push('Ritmo excelente. Nivel competitivo alto. Mantener consistencia.');
+      else if (paceMin < 5) tips.push('Buen ritmo para entrenamiento intenso. Considera alternar con dias de recuperacion.');
+      else if (paceMin < 6) tips.push('Ritmo de entrenamiento aerobico optimo. Ideal para construir base.');
+      else tips.push('Ritmo conservador. Bueno para recuperacion activa o rodajes largos.');
+    } else {
+      var speedKmh = dist / (dur/3600);
+      if (speedKmh > 35) tips.push('Velocidad alta. Excelente potencia en ciclismo.');
+      else if (speedKmh > 25) tips.push('Velocidad solida. Buen entrenamiento de resistencia ciclista.');
+      else tips.push('Velocidad moderada. Trabaja en la cadencia para mayor eficiencia.');
+    }
   }
 
-  // Pace analysis
-  if (isRun && pace) {
-    var paceMin = Math.floor(pace/60);
-    var paceSec = pace%60;
-    if (pace < 300) tips.push('<li><b>&#9889; Ritmo excelente:</b> ' + paceMin + ':' + String(paceSec).padStart(2,'0') + '/km. Ritmo de competicion.</li>');
-    else if (pace < 400) tips.push('<li><b>&#128293; Buen ritmo:</b> ' + paceMin + ':' + String(paceSec).padStart(2,'0') + '/km. Ritmo de entrenamiento fuerte.</li>');
-    else tips.push('<li><b>&#127939; Ritmo aerobico:</b> ' + paceMin + ':' + String(paceSec).padStart(2,'0') + '/km. Perfecto para rodajes largos.</li>');
+  if (avgHr > 0 && maxHr > 0) {
+    var hrPct = (avgHr / maxHr) * 100;
+    if (hrPct > 90) tips.push('Actividad en zona 5 (FC muy alta). Esfuerzo maximo. Necesitas 48-72h de recuperacion.');
+    else if (hrPct > 80) tips.push('Zona 4 (umbral lactato). Entrenamiento intenso. Recupera bien manana.');
+    else if (hrPct > 70) tips.push('Zona 3 (aerobico intenso). Buen estimulo para mejorar VO2Max.');
+    else if (hrPct > 60) tips.push('Zona 2 (aerobico base). Zona ideal para quemar grasa y construir resistencia.');
+    else tips.push('Zona 1 (recuperacion activa). Intensidad baja, buena para dias de recuperacion.');
   }
 
-  // Recovery advice
-  if (dur_min > 90 || rpe >= 8) tips.push('<li><b>&#128564; Recuperacion:</b> Actividad de alta carga. Duerme 8h, hidratate bien y considera un dia de descanso manana.</li>');
-  else if (dur_min > 60) tips.push('<li><b>&#128170; Recuperacion moderada:</b> Buena sesion. 6-8h de sueno y hidratacion suficiente para recuperar al 100%.</li>');
-
-  // Training advice
-  if (isRun) tips.push('<li><b>&#128202; Mejora sugerida:</b> Incluye 1-2 sesiones de rodaje largo por semana en Zona 2 (conversacional) para mejorar tu base aerobica y bajar tu ritmo.</li>');
-  if (isCyc) tips.push('<li><b>&#128202; Mejora sugerida:</b> Alterna sesiones Z2 largas con intervalos de 4-8 minutos al 90% de la FC maxima para aumentar potencia.</li>');
-
-  if (!tips.length) tips.push('<li>Actividad registrada correctamente. Sigue entrenando con consistencia!</li>');
-  return '<ul class="ai-tips">' + tips.join('') + '</ul>';
+  if (dur > 3600) {
+    tips.push('Actividad larga (mas de 1 hora). Asegurate de hidratarte bien y reponer carbohidratos post-entreno.');
+  }
+  if (a.calorias > 800) {
+    tips.push('Alto gasto calorico (' + a.calorias + ' kcal). Considera una comida rica en proteinas y carbohidratos para recuperar.');
+  }
+  if (a.elevacion_ganada_m > 200) {
+    tips.push('Desnivel significativo (' + a.elevacion_ganada_m.toFixed(0) + ' m). El trabajo en cuestas mejora la fuerza y economia de carrera.');
+  }
+  if (tips.length === 0) tips.push('Actividad registrada. Sigue entrenando de forma consistente para ver mejoras.');
+  return tips.map(function(t) { return '<p>' + t + '</p>'; }).join('');
 }
 
-// Run projections using Riegel formula
-function buildRunProjections(a) {
-  var dist_km = (a.distancia_metros||0)/1000;
-  var dur_s = a.duracion_segundos || 0;
-  if (dist_km < 1 || dur_s < 60) return '';
-  var races = [{d:5,name:'5 km'},{d:10,name:'10 km'},{d:15,name:'15 km'},{d:21.0975,name:'Media Maraton'},{d:42.195,name:'Maraton'}];
-  var html = '<table class="proj-table"><thead><tr><th>Distancia</th><th>Tiempo proyectado</th><th>Ritmo</th></tr></thead><tbody>';
-  races.forEach(function(r) {
-    // Riegel: T2 = T1 * (D2/D1)^1.06
-    var t2 = dur_s * Math.pow(r.d / dist_km, 1.06);
-    var pace2 = Math.round(t2 / r.d);
-    var highlight = '';
-    // Mark achievable ones (within 3x current distance)
-    if (r.d <= dist_km * 3) highlight = ' class="proj-highlight"';
-    html += '<tr' + highlight + '><td>' + r.name + '</td><td>' + formatDuration(Math.round(t2)) + '</td><td>' + formatPace(pace2) + '/km</td></tr>';
-  });
-  html += '</tbody></table><p class="proj-note">* Proyecciones basadas en formula de Riegel. Requiere entrenamiento especifico para distancias mas largas.</p>';
-  return html;
-}
-
-// Cycling projections
-function buildCyclingProjections(a) {
-  var dist_km = (a.distancia_metros||0)/1000;
-  var dur_h = (a.duracion_segundos||0)/3600;
-  if (dist_km < 5 || dur_h < 0.1) return '';
-  var avg_spd = dist_km / dur_h;
-  var goals = [{d:50,name:'50 km'},{d:100,name:'100 km (Fondo)'},{d:160,name:'160 km (Gran Fondo)'},{d:200,name:'200 km (Ultrafondo)'}];
-  var html = '<table class="proj-table"><thead><tr><th>Distancia</th><th>Tiempo estimado</th><th>Velocidad</th></tr></thead><tbody>';
-  goals.forEach(function(g) {
-    // Assume slight speed reduction for longer distances (fatigue factor)
-    var fatigue = Math.pow(0.97, Math.floor(g.d/50));
-    var adj_spd = avg_spd * fatigue;
-    var t_h = g.d / adj_spd;
-    var t_s = Math.round(t_h * 3600);
-    html += '<tr><td>' + g.name + '</td><td>' + formatDuration(t_s) + '</td><td>' + adj_spd.toFixed(1) + ' km/h</td></tr>';
-  });
-  html += '</tbody></table><p class="proj-note">* Proyecciones basadas en tu velocidad actual con factor de fatiga.</p>';
-  return html;
-}
-
-function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
-
-// FILE UPLOAD
+// ---- UPLOAD ----
 function showUploadModal() { document.getElementById('upload-modal').classList.remove('hidden'); }
-function handleDrop(e) { e.preventDefault(); e.currentTarget.classList.remove('drag-over'); var f=e.dataTransfer.files[0]; if(f) processFile(f); }
-function handleFileSelect(e) { var f=e.target.files[0]; if(f) processFile(f); }
-function processFile(file) {
-  currentFile = file; parsedData = null;
-  var ext = file.name.split('.').pop().toLowerCase();
-  if (!['gpx','fit','tcx','csv'].includes(ext)) { showToast('Formato no soportado','error'); return; }
-  document.getElementById('file-name-display').textContent = file.name;
-  document.getElementById('file-size-display').textContent = (file.size/1024).toFixed(1)+' KB';
-  document.getElementById('activity-name').value = file.name.replace(/.[^.]+$/, '');
-  document.getElementById('upload-area').classList.add('hidden');
-  document.getElementById('upload-preview').classList.remove('hidden');
-  var reader = new FileReader();
-  if (ext==='gpx') { reader.onload=function(e){parsedData=parseGPX(e.target.result);}; reader.readAsText(file); }
-  else if (ext==='tcx') { reader.onload=function(e){parsedData=parseTCX(e.target.result);}; reader.readAsText(file); }
-  else if (ext==='fit') { reader.onload=function(e){parsedData=parseFIT(e.target.result);}; reader.readAsArrayBuffer(file); }
+
+function handleDrop(e) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file) processFile(file);
 }
+
+function handleFileSelect(e) {
+  const file = e.target.files[0];
+  if (file) processFile(file);
+}
+
+function processFile(file) {
+  currentFile = file;
+  parsedActivityData = null;
+  const ext = file.name.split('.').pop().toLowerCase();
+  if (!['gpx','fit','tcx','csv'].includes(ext)) {
+    showToast('Formato no soportado. Usa GPX, FIT o TCX', 'error'); return;
+  }
+  const nameEl = document.getElementById('file-name-display');
+  const sizeEl = document.getElementById('file-size-display');
+  const actNameEl = document.getElementById('activity-name');
+  if (nameEl) nameEl.textContent = file.name;
+  if (sizeEl) sizeEl.textContent = (file.size/1024).toFixed(1) + ' KB';
+  if (actNameEl) actNameEl.value = file.name.replace(/\.[^\.]+$/, '');
+  const uploadArea = document.getElementById('upload-area');
+  const uploadPreview = document.getElementById('upload-preview');
+  if (uploadArea) uploadArea.classList.add('hidden');
+  if (uploadPreview) uploadPreview.classList.remove('hidden');
+  const reader = new FileReader();
+  if (ext === 'gpx') {
+    reader.onload = function(e) { parsedActivityData = parseGPX(e.target.result); };
+    reader.readAsText(file);
+  } else if (ext === 'tcx') {
+    reader.onload = function(e) { parsedActivityData = parseTCX(e.target.result); };
+    reader.readAsText(file);
+  } else if (ext === 'fit') {
+    reader.onload = function(e) { parsedActivityData = parseFIT(e.target.result); };
+    reader.readAsArrayBuffer(file);
+  }
+}
+
 async function uploadActivity() {
   if (!currentFile || !currentUser) return;
-  var name = document.getElementById('activity-name').value || currentFile.name;
-  var type = document.getElementById('activity-type').value;
-  var notes = document.getElementById('activity-notes').value;
-  var rpe = parseInt(document.getElementById('activity-rpe').value)||5;
-  document.getElementById('upload-preview').classList.add('hidden');
-  document.getElementById('upload-progress').classList.remove('hidden');
-  document.getElementById('progress-fill').style.width = '30%';
-  document.getElementById('upload-status').textContent = 'Procesando...';
-  await new Promise(function(r){setTimeout(r,400);});
-  var act = { user_id:currentUser.id, nombre:name, tipo_actividad:type, notas:notes, percepcion_esfuerzo:rpe, sincronizado_en:new Date().toISOString(), fecha_inicio:new Date().toISOString() };
-  var p = parsedData;
+  const nameEl = document.getElementById('activity-name');
+  const typeEl = document.getElementById('activity-type');
+  const notesEl = document.getElementById('activity-notes');
+  const rpeEl = document.getElementById('activity-rpe');
+  const nombre = nameEl ? nameEl.value : currentFile.name;
+  const type = typeEl ? typeEl.value : 'running';
+  const notas = notesEl ? notesEl.value : '';
+  const rpe = rpeEl ? parseInt(rpeEl.value) : 5;
+
+  const previewEl = document.getElementById('upload-preview');
+  const progressEl = document.getElementById('upload-progress');
+  const fillEl = document.getElementById('progress-fill');
+  const statusEl = document.getElementById('upload-status');
+  if (previewEl) previewEl.classList.add('hidden');
+  if (progressEl) progressEl.classList.remove('hidden');
+  if (fillEl) fillEl.style.width = '30%';
+  if (statusEl) statusEl.textContent = 'Procesando datos...';
+
+  await new Promise(r => setTimeout(r, 300));
+
+  const activityData = {
+    user_id: currentUser.id,
+    nombre: nombre,
+    tipo_actividad: type,
+    notas: notas,
+    percepcion_esfuerzo: rpe,
+    sincronizado_en: new Date().toISOString(),
+    fecha_inicio: new Date().toISOString()
+  };
+
+  const p = parsedActivityData;
   if (p) {
-    if (p.totalDist>0) act.distancia_metros = parseFloat(p.totalDist.toFixed(2));
-    if (p.duration>0) act.duracion_segundos = Math.round(p.duration);
-    if (p.startTime) act.fecha_inicio = p.startTime;
-    if (p.endTime) act.fecha_fin = p.endTime;
-    if (p.avgHr) act.frecuencia_cardiaca_promedio = p.avgHr;
-    if (p.maxHr) act.frecuencia_cardiaca_maxima = p.maxHr;
-    if (p.elevGain>0) act.elevacion_ganada_m = p.elevGain;
-    if (p.calories) act.calorias = p.calories;
-    if (p.avgCadence) act.cadencia_promedio = p.avgCadence;
-    if (p.maxSpeed>0) act.velocidad_maxima_ms = p.maxSpeed;
-    if (act.duracion_segundos>0 && act.distancia_metros>0) act.pace_promedio_seg_km = Math.round(act.duracion_segundos/(act.distancia_metros/1000));
-    if (p.sport && p.sport!=='other') act.tipo_actividad = p.sport;
+    if (p.totalDist > 0) activityData.distancia_metros = parseFloat(p.totalDist.toFixed(2));
+    if (p.duration > 0) activityData.duracion_segundos = Math.round(p.duration);
+    if (p.startTime) activityData.fecha_inicio = p.startTime;
+    if (p.endTime) activityData.fecha_fin = p.endTime;
+    if (p.avgHr) activityData.frecuencia_cardiaca_promedio = p.avgHr;
+    if (p.maxHr) activityData.frecuencia_cardiaca_maxima = p.maxHr;
+    if (p.elevGain > 0) activityData.elevacion_ganada_m = p.elevGain;
+    if (p.calories) activityData.calorias = p.calories;
+    if (p.avgCadence) activityData.cadencia_promedio = p.avgCadence;
+    if (p.maxSpeed > 0) activityData.velocidad_maxima_ms = p.maxSpeed;
+    if (activityData.duracion_segundos > 0 && activityData.distancia_metros > 0) {
+      activityData.pace_promedio_seg_km = Math.round(activityData.duracion_segundos / (activityData.distancia_metros / 1000));
+    }
+    if (p.sport && p.sport !== 'other' && type === 'running') activityData.tipo_actividad = p.sport;
   }
-  document.getElementById('progress-fill').style.width = '70%';
-  document.getElementById('upload-status').textContent = 'Guardando...';
-  var { error } = await _db.from('activities').insert([act]);
-  document.getElementById('progress-fill').style.width = '100%';
-  if (error) { document.getElementById('upload-status').textContent = 'Error: '+error.message; showToast('Error al guardar','error'); }
-  else { document.getElementById('upload-status').textContent = 'Guardado!'; showToast('Actividad subida!','success'); setTimeout(function(){ closeModal('upload-modal'); resetUpload(); loadActivities(); loadDashboard(); }, 1200); }
-}
-function resetUpload() {
-  currentFile=null; parsedData=null;
-  document.getElementById('upload-area').classList.remove('hidden');
-  document.getElementById('upload-preview').classList.add('hidden');
-  document.getElementById('upload-progress').classList.add('hidden');
-  document.getElementById('progress-fill').style.width='0';
-  document.getElementById('file-input').value='';
+
+  if (fillEl) fillEl.style.width = '70%';
+  if (statusEl) statusEl.textContent = 'Guardando en base de datos...';
+
+  const { error } = await _db.from('activities').insert([activityData]);
+  if (fillEl) fillEl.style.width = '100%';
+
+  if (error) {
+    if (statusEl) statusEl.textContent = 'Error: ' + error.message;
+    showToast('Error al guardar: ' + error.message, 'error');
+  } else {
+    if (statusEl) statusEl.textContent = 'Actividad guardada correctamente!';
+    showToast('Actividad subida exitosamente!', 'success');
+    setTimeout(function() {
+      closeModal('upload-modal');
+      resetUploadModal();
+      loadActivities();
+      loadDashboard();
+    }, 1500);
+  }
 }
 
-// GPX PARSER
-function parseGPX(xml) {
-  var doc = new DOMParser().parseFromString(xml,'text/xml');
-  var pts = doc.querySelectorAll('trkpt'), times=[], hrs=[], elevs=[], positions=[], totalDist=0, prev=null;
-  pts.forEach(function(pt) {
-    var lat=parseFloat(pt.getAttribute('lat')), lon=parseFloat(pt.getAttribute('lon'));
-    var ele=parseFloat(pt.querySelector('ele')&&pt.querySelector('ele').textContent||0);
-    var t=pt.querySelector('time')&&pt.querySelector('time').textContent;
-    var hr=parseInt((pt.querySelector('hr,heartrate,value')&&pt.querySelector('hr,heartrate,value').textContent)||0);
-    if (!isNaN(lat)&&!isNaN(lon)) { positions.push([lat,lon]); if(prev) totalDist+=haversine(prev[0],prev[1],lat,lon); prev=[lat,lon]; }
-    if(t) times.push(new Date(t));
-    if(ele>0) elevs.push(ele);
-    if(hr>0) hrs.push(hr);
-  });
-  var dur=times.length>1?(times[times.length-1]-times[0])/1000:0;
-  var eg=0; for(var i=1;i<elevs.length;i++) if(elevs[i]>elevs[i-1]) eg+=elevs[i]-elevs[i-1];
-  return { totalDist:totalDist, duration:Math.round(dur), startTime:times[0]&&times[0].toISOString(), endTime:times[times.length-1]&&times[times.length-1].toISOString(),
-    avgHr:hrs.length?Math.round(hrs.reduce(function(a,b){return a+b;},0)/hrs.length):null, maxHr:hrs.length?Math.max.apply(null,hrs):null, elevGain:parseFloat(eg.toFixed(1)),
-    startCoords:positions[0]?{lat:positions[0][0],lng:positions[0][1]}:null };
+function resetUploadModal() {
+  currentFile = null; parsedActivityData = null;
+  const uploadArea = document.getElementById('upload-area');
+  const uploadPreview = document.getElementById('upload-preview');
+  const uploadProgress = document.getElementById('upload-progress');
+  const fillEl = document.getElementById('progress-fill');
+  const fileInput = document.getElementById('file-input');
+  if (uploadArea) uploadArea.classList.remove('hidden');
+  if (uploadPreview) uploadPreview.classList.add('hidden');
+  if (uploadProgress) uploadProgress.classList.add('hidden');
+  if (fillEl) fillEl.style.width = '0';
+  if (fileInput) fileInput.value = '';
 }
-// TCX PARSER
-function parseTCX(xml) {
-  var doc = new DOMParser().parseFromString(xml,'text/xml');
-  var pts=doc.querySelectorAll('Trackpoint'), times=[],hrs=[],elevs=[],positions=[],totalDist=0;
-  pts.forEach(function(tp) {
-    var t=tp.querySelector('Time')&&tp.querySelector('Time').textContent;
-    var hr=parseInt((tp.querySelector('HeartRateBpm Value')&&tp.querySelector('HeartRateBpm Value').textContent)||(tp.querySelector('HeartRateBpm')&&tp.querySelector('HeartRateBpm').textContent)||0);
-    var ele=parseFloat((tp.querySelector('AltitudeMeters')&&tp.querySelector('AltitudeMeters').textContent)||0);
-    var dist=parseFloat((tp.querySelector('DistanceMeters')&&tp.querySelector('DistanceMeters').textContent)||0);
-    var lat=parseFloat(tp.querySelector('LatitudeDegrees')&&tp.querySelector('LatitudeDegrees').textContent);
-    var lon=parseFloat(tp.querySelector('LongitudeDegrees')&&tp.querySelector('LongitudeDegrees').textContent);
-    if(t) times.push(new Date(t));
-    if(hr>0) hrs.push(hr);
-    if(ele>0) elevs.push(ele);
-    if(!isNaN(lat)&&!isNaN(lon)) positions.push([lat,lon]);
-    if(dist>totalDist) totalDist=dist;
-  });
-  if(totalDist===0&&positions.length>1){var d=0,pv=null;positions.forEach(function(p){if(pv)d+=haversine(pv[0],pv[1],p[0],p[1]);pv=p;});totalDist=d;}
-  var cal=parseInt((doc.querySelector('Calories')&&doc.querySelector('Calories').textContent)||0)||null;
-  var dur=times.length>1?(times[times.length-1]-times[0])/1000:0;
-  var eg=0; for(var i=1;i<elevs.length;i++) if(elevs[i]>elevs[i-1]) eg+=elevs[i]-elevs[i-1];
-  return { totalDist:totalDist, duration:Math.round(dur), startTime:times[0]&&times[0].toISOString(), endTime:times[times.length-1]&&times[times.length-1].toISOString(),
-    avgHr:hrs.length?Math.round(hrs.reduce(function(a,b){return a+b;},0)/hrs.length):null, maxHr:hrs.length?Math.max.apply(null,hrs):null, elevGain:parseFloat(eg.toFixed(1)), calories:cal };
-}
-// FIT BINARY PARSER
-function parseFIT(ab) {
-  var bytes=new Uint8Array(ab), view=new DataView(ab);
-  if(bytes.length<14) return null;
-  var hs=bytes[0];
-  if(String.fromCharCode(bytes[8],bytes[9],bytes[10],bytes[11])!=='.FIT') return null;
-  var defs={}, records=[], session=null, offset=hs, end=bytes.length-2;
-  while(offset<end) {
-    if(offset>=bytes.length) break;
-    var rh=bytes[offset], isComp=(rh&0x80)!==0, isDef=!isComp&&(rh&0x40)!==0, lmn=isComp?(rh>>5)&3:rh&0x0F, hasDev=!isComp&&(rh&0x20)!==0;
+
+// ---- FIT PARSER ----
+function parseFIT(arrayBuffer) {
+  var bytes = new Uint8Array(arrayBuffer);
+  var view = new DataView(arrayBuffer);
+  if (bytes.length < 14) return null;
+  var headerSize = bytes[0];
+  var dataType = String.fromCharCode(bytes[8],bytes[9],bytes[10],bytes[11]);
+  if (dataType !== '.FIT') return null;
+
+  var localDefs = {};
+  var offset = headerSize;
+  var dataEnd = bytes.length - 2;
+  var records = [];
+  var sessionData = null;
+  var MESG_SESSION = 18;
+  var MESG_RECORD = 20;
+
+  while (offset < dataEnd) {
+    if (offset >= bytes.length) break;
+    var recHeader = bytes[offset];
+    var isCompressed = (recHeader & 0x80) !== 0;
+    var isDef = !isCompressed && (recHeader & 0x40) !== 0;
+    var localNum = isCompressed ? (recHeader >> 5) & 0x03 : recHeader & 0x0F;
+    var hasDev = !isCompressed && (recHeader & 0x20) !== 0;
     offset++;
-    if(isDef) {
-      offset++; var arch=bytes[offset++], le=arch===0;
-      var gm=le?view.getUint16(offset,true):view.getUint16(offset,false); offset+=2;
-      var nf=bytes[offset++], flds=[];
-      for(var i=0;i<nf;i++){flds.push({fd:bytes[offset++],fs:bytes[offset++],bt:bytes[offset++]});}
-      if(hasDev){var nd=bytes[offset++];for(var j=0;j<nd;j++) offset+=3;}
-      defs[lmn]={gm:gm,le:le,flds:flds};
+
+    if (isDef) {
+      offset++;
+      var arch = bytes[offset++];
+      var le = arch === 0;
+      var globalNum = le ? view.getUint16(offset,true) : view.getUint16(offset,false);
+      offset += 2;
+      var numFields = bytes[offset++];
+      var fields = [];
+      for (var i = 0; i < numFields; i++) {
+        var fdn = bytes[offset++];
+        var fsz = bytes[offset++];
+        var fbt = bytes[offset++];
+        fields.push({ fdn: fdn, fsz: fsz, fbt: fbt });
+      }
+      if (hasDev) { var nd = bytes[offset++]; for (var j=0;j<nd;j++) offset+=3; }
+      localDefs[localNum] = { globalNum: globalNum, le: le, fields: fields };
     } else {
-      var def=defs[lmn]; if(!def){offset++;continue;}
-      var rec={_gm:def.gm};
-      def.flds.forEach(function(f){
-        var bt=f.bt&0x9F, v=0;
-        try{
-          if(bt===0x00||bt===0x02||bt===0x0A) v=bytes[offset];
-          else if(bt===0x01) v=view.getInt8(offset);
-          else if(bt===0x83) v=def.le?view.getInt16(offset,true):view.getInt16(offset,false);
-          else if(bt===0x84) v=def.le?view.getUint16(offset,true):view.getUint16(offset,false);
-          else if(bt===0x85) v=def.le?view.getInt32(offset,true):view.getInt32(offset,false);
-          else if(bt===0x86) v=def.le?view.getUint32(offset,true):view.getUint32(offset,false);
-          else v=bytes[offset];
-        }catch(e){v=0;}
-        rec[f.fd]=v; offset+=f.fs;
-      });
-      if(def.gm===20) records.push(rec);
-      if(def.gm===18) session=rec;
+      var def = localDefs[localNum];
+      if (!def) { offset++; continue; }
+      var rec = { _type: def.globalNum };
+      for (var fi = 0; fi < def.fields.length; fi++) {
+        var f = def.fields[fi];
+        var bt = f.fbt & 0x9F;
+        var v = 0;
+        try {
+          if (bt===0x00||bt===0x02||bt===0x0A) v = bytes[offset];
+          else if (bt===0x01) v = view.getInt8(offset);
+          else if (bt===0x83) v = f.le ? view.getInt16(offset,true) : view.getInt16(offset,false);
+          else if (bt===0x84) v = f.le ? view.getUint16(offset,true) : view.getUint16(offset,false);
+          else if (bt===0x85) v = f.le ? view.getInt32(offset,true) : view.getInt32(offset,false);
+          else if (bt===0x86) v = f.le ? view.getUint32(offset,true) : view.getUint32(offset,false);
+          else v = bytes[offset];
+        } catch(e) { v = 0; }
+        rec[f.fdn] = v;
+        offset += f.fsz;
+      }
+      if (def.globalNum === MESG_RECORD) records.push(rec);
+      if (def.globalNum === MESG_SESSION) sessionData = rec;
     }
   }
-  var SPORTS={0:'other',1:'running',2:'cycling',5:'swimming',4:'hiking',11:'walking',10:'strength'};
-  var SC=180/Math.pow(2,31);
-  var dist=0,dur=0,cal=null,avgHr=null,maxHr=null,cad=null,maxSpd=0,elev=0,st=null,et=null,sp=0;
-  if(session){
-    if(session[9]!==undefined&&session[9]<0xFFFFFFFF) dist=session[9]/100;
-    if(session[7]!==undefined&&session[7]<0xFFFFFFFF) dur=session[7]/1000;
-    if(session[11]!==undefined&&session[11]<0xFFFF) cal=session[11];
-    if(session[14]!==undefined&&session[14]<0xFF) avgHr=session[14];
-    if(session[15]!==undefined&&session[15]<0xFF) maxHr=session[15];
-    if(session[16]!==undefined&&session[16]<0xFF) cad=session[16];
-    if(session[19]!==undefined&&session[19]<0xFFFF) maxSpd=session[19]/1000;
-    if(session[22]!==undefined&&session[22]<0xFFFF) elev=session[22];
-    if(session[5]!==undefined) sp=session[5];
-    if(session[2]!==undefined&&session[2]<0xFFFFFFFF){st=new Date((session[2]+631065600)*1000).toISOString();if(dur)et=new Date((session[2]+631065600+Math.round(dur))*1000).toISOString();}
-  }
-  var sc=null, rHrs=[], rLats=[], rLons=[];
-  records.forEach(function(r){
-    var lat=r[0],lon=r[1];
-    if(lat!==undefined&&lon!==undefined&&lat!==0x7FFFFFFF&&lon!==0x7FFFFFFF&&lat!==0){
-      var ld=lat*SC,lo2=lon*SC; if(!sc) sc={lat:ld,lng:lo2}; rLats.push(ld); rLons.push(lo2);
+
+  var SPORT_MAP = {0:'other',1:'running',2:'cycling',5:'swimming',4:'hiking',11:'walking',10:'strength'};
+  var SC = 180 / Math.pow(2,31);
+
+  var totalDist=0, duration=0, calories=null, avgHr=null, maxHr=null;
+  var avgCadence=null, maxSpeed=0, elevGain=0, startTime=null, endTime=null, sportCode=0;
+
+  if (sessionData) {
+    if (sessionData[9] !== undefined && sessionData[9] < 0xFFFFFFFF) totalDist = sessionData[9] / 100;
+    if (sessionData[7] !== undefined && sessionData[7] < 0xFFFFFFFF) duration = sessionData[7] / 1000;
+    if (sessionData[11] !== undefined && sessionData[11] < 0xFFFF) calories = sessionData[11];
+    if (sessionData[14] !== undefined && sessionData[14] < 0xFF) avgHr = sessionData[14];
+    if (sessionData[15] !== undefined && sessionData[15] < 0xFF) maxHr = sessionData[15];
+    if (sessionData[16] !== undefined && sessionData[16] < 0xFF) avgCadence = sessionData[16];
+    if (sessionData[19] !== undefined && sessionData[19] < 0xFFFF) maxSpeed = sessionData[19]/1000;
+    if (sessionData[22] !== undefined && sessionData[22] < 0xFFFF) elevGain = sessionData[22]/5;
+    if (sessionData[5] !== undefined) sportCode = sessionData[5];
+    if (sessionData[2] !== undefined && sessionData[2] < 0xFFFFFFFF) {
+      startTime = new Date((sessionData[2] + 631065600) * 1000).toISOString();
+      if (duration) endTime = new Date((sessionData[2] + 631065600 + Math.round(duration)) * 1000).toISOString();
     }
-    if(r[3]!==undefined&&r[3]>0&&r[3]<0xFF) rHrs.push(r[3]);
-    if(r[253]!==undefined&&r[253]<0xFFFFFFFF&&!st) st=new Date((r[253]+631065600)*1000).toISOString();
+  }
+
+  var startCoords=null, recHrs=[], recLats=[], recLons=[];
+  records.forEach(function(r) {
+    var lat = r[0], lon = r[1];
+    if (lat !== undefined && lon !== undefined && lat !== 0x7FFFFFFF && lon !== 0x7FFFFFFF && lat !== 0) {
+      var latD = lat * SC, lonD = lon * SC;
+      if (!startCoords) startCoords = { lat: latD, lng: lonD };
+      recLats.push(latD); recLons.push(lonD);
+    }
+    if (r[3] !== undefined && r[3] > 0 && r[3] < 0xFF) recHrs.push(r[3]);
+    if (r[253] !== undefined && r[253] < 0xFFFFFFFF && !startTime)
+      startTime = new Date((r[253] + 631065600) * 1000).toISOString();
   });
-  if(!dist&&rLats.length>1){var d2=0;for(var k=1;k<rLats.length;k++) d2+=haversine(rLats[k-1],rLons[k-1],rLats[k],rLons[k]);dist=d2;}
-  if(!avgHr&&rHrs.length) avgHr=Math.round(rHrs.reduce(function(a,b){return a+b;},0)/rHrs.length);
-  if(!maxHr&&rHrs.length) maxHr=Math.max.apply(null,rHrs);
-  return {totalDist:dist,duration:Math.round(dur),startTime:st,endTime:et,avgHr:avgHr,maxHr:maxHr,avgCadence:cad,maxSpeed:maxSpd,elevGain:elev,calories:cal,sport:SPORTS[sp]||'other'};
+
+  if (!totalDist && recLats.length > 1) {
+    var d = 0;
+    for (var ri=1; ri<recLats.length; ri++) d += haversine(recLats[ri-1],recLons[ri-1],recLats[ri],recLons[ri]);
+    totalDist = d;
+  }
+  if (!avgHr && recHrs.length) avgHr = Math.round(recHrs.reduce(function(a,b){return a+b;},0)/recHrs.length);
+  if (!maxHr && recHrs.length) maxHr = Math.max.apply(null, recHrs);
+
+  return {
+    totalDist: totalDist,
+    duration: Math.round(duration),
+    startTime: startTime,
+    endTime: endTime,
+    avgHr: avgHr,
+    maxHr: maxHr,
+    avgCadence: avgCadence,
+    maxSpeed: maxSpeed,
+    elevGain: elevGain,
+    calories: calories,
+    startCoords: startCoords,
+    sport: SPORT_MAP[sportCode] || 'other'
+  };
 }
-function haversine(la1,lo1,la2,lo2){
-  var R=6371000,p1=la1*Math.PI/180,p2=la2*Math.PI/180,dp=(la2-la1)*Math.PI/180,dl=(lo2-lo1)*Math.PI/180;
-  var a=Math.sin(dp/2)*Math.sin(dp/2)+Math.cos(p1)*Math.cos(p2)*Math.sin(dl/2)*Math.sin(dl/2);
+
+// ---- TCX PARSER ----
+function parseTCX(xmlString) {
+  var parser = new DOMParser();
+  var xml = parser.parseFromString(xmlString, 'text/xml');
+  var trkpts = xml.querySelectorAll('Trackpoint');
+  var times=[], hrs=[], elevs=[], positions=[];
+  var totalDist = 0;
+  trkpts.forEach(function(tp) {
+    var time = tp.querySelector('Time') ? tp.querySelector('Time').textContent : null;
+    var hrEl = tp.querySelector('HeartRateBpm Value') || tp.querySelector('HeartRateBpm');
+    var hr = hrEl ? parseInt(hrEl.textContent) : 0;
+    var eleEl = tp.querySelector('AltitudeMeters');
+    var ele = eleEl ? parseFloat(eleEl.textContent) : 0;
+    var distEl = tp.querySelector('DistanceMeters');
+    var dist = distEl ? parseFloat(distEl.textContent) : 0;
+    var latEl = tp.querySelector('LatitudeDegrees');
+    var lonEl = tp.querySelector('LongitudeDegrees');
+    var lat = latEl ? parseFloat(latEl.textContent) : NaN;
+    var lon = lonEl ? parseFloat(lonEl.textContent) : NaN;
+    if (time) times.push(new Date(time));
+    if (hr > 0) hrs.push(hr);
+    if (ele > 0) elevs.push(ele);
+    if (!isNaN(lat) && !isNaN(lon)) positions.push([lat,lon]);
+    if (dist > totalDist) totalDist = dist;
+  });
+  if (totalDist === 0 && positions.length > 1) {
+    var d=0, prev=null;
+    positions.forEach(function(p) { if(prev) d+=haversine(prev[0],prev[1],p[0],p[1]); prev=p; });
+    totalDist = d;
+  }
+  var calEl = xml.querySelector('Calories');
+  var calories = calEl ? parseInt(calEl.textContent) : null;
+  var duration = times.length > 1 ? (times[times.length-1]-times[0])/1000 : 0;
+  var avgHr = hrs.length ? Math.round(hrs.reduce(function(a,b){return a+b;},0)/hrs.length) : null;
+  var maxHr = hrs.length ? Math.max.apply(null,hrs) : null;
+  var elevGain=0;
+  for(var i=1;i<elevs.length;i++) if(elevs[i]>elevs[i-1]) elevGain+=elevs[i]-elevs[i-1];
+  return {
+    totalDist: totalDist,
+    duration: Math.round(duration),
+    startTime: times[0] ? times[0].toISOString() : null,
+    endTime: times[times.length-1] ? times[times.length-1].toISOString() : null,
+    avgHr: avgHr, maxHr: maxHr, calories: calories,
+    elevGain: parseFloat(elevGain.toFixed(1)),
+    startCoords: positions[0] ? {lat:positions[0][0],lng:positions[0][1]} : null
+  };
+}
+
+// ---- GPX PARSER ----
+function parseGPX(xmlString) {
+  var parser = new DOMParser();
+  var xml = parser.parseFromString(xmlString, 'text/xml');
+  var trkpts = xml.querySelectorAll('trkpt');
+  var points=[], times=[], elevs=[], hrs=[];
+  var totalDist=0, prevPt=null;
+  trkpts.forEach(function(pt) {
+    var lat = parseFloat(pt.getAttribute('lat'));
+    var lon = parseFloat(pt.getAttribute('lon'));
+    var eleEl = pt.querySelector('ele');
+    var ele = eleEl ? parseFloat(eleEl.textContent) : 0;
+    var timeEl = pt.querySelector('time');
+    var time = timeEl ? timeEl.textContent : null;
+    var hrEl = pt.querySelector('gpxtpx\\:hr') || pt.querySelector('hr') || pt.querySelector('heartrate');
+    var hr = hrEl ? parseInt(hrEl.textContent) : 0;
+    if (!isNaN(lat) && !isNaN(lon)) {
+      points.push([lat,lon]);
+      if (prevPt) totalDist += haversine(prevPt[0],prevPt[1],lat,lon);
+      prevPt = [lat,lon];
+    }
+    if (time) times.push(new Date(time));
+    if (ele>0) elevs.push(ele);
+    if (hr>0) hrs.push(hr);
+  });
+  var duration = times.length>1 ? (times[times.length-1]-times[0])/1000 : 0;
+  var avgHr = hrs.length ? Math.round(hrs.reduce(function(a,b){return a+b;},0)/hrs.length) : null;
+  var maxHr = hrs.length ? Math.max.apply(null,hrs) : null;
+  var elevGain=0;
+  for(var i=1;i<elevs.length;i++) if(elevs[i]>elevs[i-1]) elevGain+=elevs[i]-elevs[i-1];
+  return {
+    totalDist: totalDist,
+    duration: Math.round(duration),
+    startTime: times[0] ? times[0].toISOString() : null,
+    endTime: times[times.length-1] ? times[times.length-1].toISOString() : null,
+    avgHr: avgHr, maxHr: maxHr,
+    elevGain: parseFloat(elevGain.toFixed(1)),
+    startCoords: points[0] ? {lat:points[0][0],lng:points[0][1]} : null
+  };
+}
+
+function haversine(lat1,lon1,lat2,lon2) {
+  var R=6371000;
+  var phi1=lat1*Math.PI/180, phi2=lat2*Math.PI/180;
+  var dphi=(lat2-lat1)*Math.PI/180, dlam=(lon2-lon1)*Math.PI/180;
+  var a=Math.sin(dphi/2)*Math.sin(dphi/2)+Math.cos(phi1)*Math.cos(phi2)*Math.sin(dlam/2)*Math.sin(dlam/2);
   return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
 }
 
-// DAILY METRICS
+// ---- DAILY METRICS ----
 async function loadDailyMetrics() {
   if (!currentUser) return;
-  var date=document.getElementById('daily-date-picker').value||new Date().toISOString().split('T')[0];
-  var {data}=await _db.from('daily_metrics').select('*').eq('user_id',currentUser.id).eq('fecha',date).single();
-  var set=function(id,val,sfx){var el=document.getElementById(id);if(el)el.textContent=val?val+(sfx||''):'--';};
-  set('d-steps',data&&data.pasos&&data.pasos.toLocaleString());
-  set('d-hr',data&&data.frecuencia_cardiaca_reposo,' bpm');
-  set('d-battery',data&&data.body_battery_max);
-  set('d-sleep',data&&data.horas_sueno&&data.horas_sueno.toFixed(1),' h');
-  set('d-stress',data&&data.nivel_estres);
-  set('d-hrv',data&&data.variabilidad_fc_hrv,' ms');
-  set('d-readiness',data&&data.training_readiness);
-  set('d-spo2',data&&data.spo2_promedio&&data.spo2_promedio.toFixed(1),'%');
-  var sd=new Date(); sd.setDate(sd.getDate()-7);
-  var {data:wd}=await _db.from('daily_metrics').select('*').eq('user_id',currentUser.id).gte('fecha',sd.toISOString().split('T')[0]).order('fecha');
-  renderWellnessChart(wd||[]);
+  var dpEl = document.getElementById('daily-date-picker');
+  var date = dpEl ? dpEl.value : new Date().toISOString().split('T')[0];
+  var { data } = await _db.from('daily_metrics').select('*').eq('user_id',currentUser.id).eq('fecha',date).single();
+  function set(id,val,suffix) { var el=document.getElementById(id); if(el) el.textContent=val!=null ? val+(suffix||'') : '--'; }
+  set('d-steps', data && data.pasos ? data.pasos.toLocaleString() : null);
+  set('d-hr', data ? data.frecuencia_cardiaca_reposo : null,' bpm');
+  set('d-battery', data ? data.body_battery_max : null);
+  set('d-sleep', data && data.horas_sueno ? data.horas_sueno.toFixed(1) : null,' h');
+  set('d-stress', data ? data.nivel_estres : null);
+  set('d-hrv', data ? data.variabilidad_fc_hrv : null,' ms');
+  set('d-readiness', data ? data.training_readiness : null);
+  set('d-spo2', data && data.spo2_promedio ? data.spo2_promedio.toFixed(1) : null,'%');
+  var sevenDaysAgo = new Date(); sevenDaysAgo.setDate(sevenDaysAgo.getDate()-7);
+  var { data: weekData } = await _db.from('daily_metrics').select('*')
+    .eq('user_id',currentUser.id).gte('fecha',sevenDaysAgo.toISOString().split('T')[0]).order('fecha');
+  renderWellnessChart(weekData||[]);
 }
+
 function renderWellnessChart(data) {
-  var ctx=document.getElementById('wellness-chart'); if(!ctx) return;
-  if(charts.wellness) charts.wellness.destroy();
-  charts.wellness=new Chart(ctx,{type:'line',data:{labels:data.map(function(d){return d.fecha&&d.fecha.substring(5);}),
-    datasets:[{label:'Body Battery',data:data.map(function(d){return d.body_battery_max;}),borderColor:'#FC4C02',tension:0.4,fill:false},
-    {label:'Readiness',data:data.map(function(d){return d.training_readiness;}),borderColor:'#10B981',tension:0.4,fill:false},
-    {label:'Estres',data:data.map(function(d){return d.nivel_estres;}),borderColor:'#EF4444',tension:0.4,fill:false}]},
-    options:{responsive:true,scales:{x:{grid:{color:'rgba(255,255,255,0.1)'},ticks:{color:'#aaa'}},y:{grid:{color:'rgba(255,255,255,0.1)'},ticks:{color:'#aaa'},min:0,max:100}},plugins:{legend:{labels:{color:'#ccc'}}}}});
+  var ctx = document.getElementById('wellness-chart');
+  if (!ctx) return;
+  if (charts.wellness) charts.wellness.destroy();
+  charts.wellness = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: data.map(function(d) { return d.fecha ? d.fecha.substring(5) : ''; }),
+      datasets: [
+        { label:'Body Battery', data:data.map(function(d){return d.body_battery_max;}), borderColor:'#FC4C02',tension:0.4,fill:false },
+        { label:'Readiness', data:data.map(function(d){return d.training_readiness;}), borderColor:'#10B981',tension:0.4,fill:false },
+        { label:'Estres', data:data.map(function(d){return d.nivel_estres;}), borderColor:'#EF4444',tension:0.4,fill:false }
+      ]
+    },
+    options: { responsive:true, scales: { x:{grid:{color:'#334155'},ticks:{color:'#94A3B8'}}, y:{grid:{color:'#334155'},ticks:{color:'#94A3B8'},min:0,max:100} }, plugins: { legend:{labels:{color:'#94A3B8'}} } }
+  });
 }
-// RECORDS
+
+// ---- RECORDS ----
 async function loadRecords() {
   if (!currentUser) return;
-  var {data:acts}=await _db.from('activities').select('*').eq('user_id',currentUser.id).eq('tipo_actividad','running').order('pace_promedio_seg_km',{ascending:true});
-  var findBest=function(mn,mx){return acts&&acts.find(function(a){return a.distancia_metros>=mn&&a.distancia_metros<=mx&&a.duracion_segundos;});};
-  var ft=function(s){if(!s)return '--:--';var h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sc=s%60;return h>0?h+':'+String(m).padStart(2,'0')+':'+String(sc).padStart(2,'0'):String(m).padStart(2,'0')+':'+String(sc).padStart(2,'0');};
-  var p5=findBest(4900,5100),p10=findBest(9900,10100),ph=findBest(21000,21200),pf=findBest(42100,42300);
-  document.getElementById('pr-5k').textContent=p5?ft(p5.duracion_segundos):'--:--';
-  document.getElementById('pr-10k').textContent=p10?ft(p10.duracion_segundos):'--:--';
-  document.getElementById('pr-half').textContent=ph?ft(ph.duracion_segundos):'--:--';
-  document.getElementById('pr-full').textContent=pf?ft(pf.duracion_segundos):'--:--';
-  var {data:all}=await _db.from('activities').select('distancia_metros,velocidad_maxima_ms').eq('user_id',currentUser.id);
-  if(all&&all.length){document.getElementById('pr-longest').textContent=(Math.max.apply(null,all.map(function(a){return a.distancia_metros||0;}))/1000).toFixed(2)+' km';document.getElementById('pr-speed').textContent=(Math.max.apply(null,all.map(function(a){return a.velocidad_maxima_ms||0;}))*3.6).toFixed(1)+' km/h';}
+  var { data: acts } = await _db.from('activities').select('*').eq('user_id',currentUser.id).eq('tipo_actividad','running').order('pace_promedio_seg_km',{ascending:true});
+  var findBest = function(min,max) { return acts && acts.find(function(a){ return a.distancia_metros>=min && a.distancia_metros<=max && a.duracion_segundos; }); };
+  var fmtTime = function(secs) {
+    if(!secs) return '--:--';
+    var h=Math.floor(secs/3600),m=Math.floor((secs%3600)/60),s=secs%60;
+    return h>0 ? h+':'+String(m).padStart(2,'0')+':'+String(s).padStart(2,'0') : String(m).padStart(2,'0')+':'+String(s).padStart(2,'0');
+  };
+  var pr5k=findBest(4900,5100), pr10k=findBest(9900,10100), prHalf=findBest(21000,21200), prFull=findBest(42100,42300);
+  var el5k=document.getElementById('pr-5k'), el10k=document.getElementById('pr-10k');
+  var elHalf=document.getElementById('pr-half'), elFull=document.getElementById('pr-full');
+  if(el5k) el5k.textContent=fmtTime(pr5k && pr5k.duracion_segundos);
+  if(el10k) el10k.textContent=fmtTime(pr10k && pr10k.duracion_segundos);
+  if(elHalf) elHalf.textContent=fmtTime(prHalf && prHalf.duracion_segundos);
+  if(elFull) elFull.textContent=fmtTime(prFull && prFull.duracion_segundos);
+  var { data: allActs } = await _db.from('activities').select('distancia_metros,velocidad_maxima_ms').eq('user_id',currentUser.id);
+  if (allActs && allActs.length) {
+    var longest = Math.max.apply(null, allActs.map(function(a){return a.distancia_metros||0;}));
+    var maxSpd = Math.max.apply(null, allActs.map(function(a){return a.velocidad_maxima_ms||0;}));
+    var elLong=document.getElementById('pr-longest'), elSpd=document.getElementById('pr-speed');
+    if(elLong) elLong.textContent=(longest/1000).toFixed(2)+' km';
+    if(elSpd) elSpd.textContent=(maxSpd*3.6).toFixed(1)+' km/h';
+  }
 }
-// PLANS
+
+// ---- PLANS ----
 async function loadPlans() {
-  if(!currentUser) return;
-  var {data}=await _db.from('training_plans').select('*').eq('user_id',currentUser.id).order('creado_en',{ascending:false});
-  var list=document.getElementById('plans-list');
-  if(!data||!data.length){list.innerHTML='<div class="empty-state"><p>No tienes planes. Crea uno!</p></div>';return;}
-  list.innerHTML=data.map(function(p){
-    return '<div class="plan-card"><div><h4>'+p.nombre+'</h4><p style="color:#aaa;font-size:0.85rem;">'+( p.descripcion||'')+'</p><p style="color:#888;font-size:0.8rem;">'+(p.semanas||0)+' semanas</p></div>'+
-    '<div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end;"><span class="plan-badge">'+(p.deporte||'General')+'</span>'+
-    '<button class="btn-delete" onclick="deletePlan('+JSON.stringify(p.id)+')">&#128465;</button></div></div>';
+  if (!currentUser) return;
+  var { data } = await _db.from('training_plans').select('*').eq('user_id',currentUser.id).order('creado_en',{ascending:false});
+  var list = document.getElementById('plans-list');
+  if (!list) return;
+  if (!data || !data.length) { list.innerHTML='<div class="empty-state"><div class="empty-icon">📋</div><p>No tienes planes. Crea uno!</p></div>'; return; }
+  list.innerHTML = data.map(function(p) {
+    var parts = [];
+    parts.push('<div class="plan-card">');
+    parts.push('<div><h4>' + p.nombre + '</h4>');
+    parts.push('<p style="color:var(--text-muted);font-size:0.85rem;">' + (p.descripcion||'') + '</p>');
+    parts.push('<p style="color:var(--text-muted);font-size:0.8rem;">' + (p.semanas||0) + ' semanas | Inicio: ' + (p.fecha_inicio||'--') + '</p></div>');
+    parts.push('<div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end;">');
+    parts.push('<span class="plan-badge">' + (p.deporte||'General') + '</span>');
+    parts.push('<button class="btn-secondary" style="font-size:0.8rem;padding:6px 12px;" onclick="deletePlan(' + JSON.stringify(p.id) + ')">Eliminar</button></div></div>');
+    return parts.join('');
   }).join('');
 }
-function showCreatePlanModal(){document.getElementById('plan-modal').classList.remove('hidden');}
+
+function showCreatePlanModal() { var m=document.getElementById('plan-modal'); if(m) m.classList.remove('hidden'); }
+
 async function createPlan(e) {
   e.preventDefault();
-  var pd={user_id:currentUser.id,nombre:document.getElementById('plan-name').value,descripcion:document.getElementById('plan-desc').value,deporte:document.getElementById('plan-sport').value,nivel:document.getElementById('plan-level').value,semanas:parseInt(document.getElementById('plan-weeks').value)||null,fecha_inicio:document.getElementById('plan-start').value,activo:true};
-  var {error}=await _db.from('training_plans').insert([pd]);
-  if(!error){closeModal('plan-modal');loadPlans();showToast('Plan creado!','success');e.target.reset();}else showToast('Error: '+error.message,'error');
+  var planData = {
+    user_id: currentUser.id,
+    nombre: document.getElementById('plan-name').value,
+    descripcion: document.getElementById('plan-desc').value,
+    deporte: document.getElementById('plan-sport').value,
+    nivel: document.getElementById('plan-level').value,
+    semanas: parseInt(document.getElementById('plan-weeks').value)||null,
+    fecha_inicio: document.getElementById('plan-start').value,
+    activo: true
+  };
+  var { error } = await _db.from('training_plans').insert([planData]);
+  if (!error) { closeModal('plan-modal'); loadPlans(); showToast('Plan creado!','success'); e.target.reset(); }
+  else showToast('Error: '+error.message,'error');
 }
-async function deletePlan(id){if(!confirm('Eliminar plan?'))return;await _db.from('training_plans').delete().eq('id',id);loadPlans();showToast('Plan eliminado','success');}
-// PROFILE
-async function loadProfile(){if(!currentUser)return;var{data}=await _db.from('user_profile').select('*').eq('user_id',currentUser.id).limit(1).single();if(data)document.getElementById('user-name-display').textContent=data.nombre||'Usuario';}
-async function loadProfilePage(){if(!currentUser)return;var{data:p}=await _db.from('user_profile').select('*').eq('user_id',currentUser.id).limit(1).single();if(p){document.getElementById('profile-name').textContent=p.nombre||'Sebastian';var age=new Date().getFullYear()-new Date(p.fecha_nacimiento).getFullYear();document.getElementById('p-age').textContent=age+' anos';document.getElementById('p-weight').textContent=p.peso_kg+' kg';document.getElementById('p-height').textContent=(p.estatura_cm/100).toFixed(2)+' m';var bmi=p.peso_kg/Math.pow(p.estatura_cm/100,2);document.getElementById('p-bmi').textContent=bmi.toFixed(1);document.getElementById('p-maxhr').textContent=(220-age)+' bpm';document.getElementById('p-resthr').textContent=(p.frecuencia_cardiaca_reposo||60)+' bpm';}}
-function connectGarmin(){showToast('Integracion Garmin proximamente!','success');}
-// UTILS
-function sportIcon(t){return {running:'&#127939;',cycling:'&#128692;',swimming:'&#127944;',hiking:'&#129374;',walking:'&#128694;',strength:'&#128170;',yoga:'&#129496;',triathlon:'&#127885;'}[t]||'&#127947;';}
-function formatDuration(s,compact){if(!s)return '--';var h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sc=s%60;if(compact)return h>0?h+'h '+m+'m':m+'m';return h>0?h+':'+String(m).padStart(2,'0')+':'+String(sc).padStart(2,'0'):String(m).padStart(2,'0')+':'+String(sc).padStart(2,'0');}
-function formatDate(iso){if(!iso)return '--';return new Date(iso).toLocaleDateString('es-ES',{day:'2-digit',month:'short',year:'numeric'});}
-function formatPace(s){if(!s)return '--';return Math.floor(s/60)+':'+String(s%60).padStart(2,'0');}
-function getWeekKey(d){var u=new Date(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate()));var dn=u.getUTCDay()||7;u.setUTCDate(u.getUTCDate()+4-dn);var ys=new Date(Date.UTC(u.getUTCFullYear(),0,1));return u.getUTCFullYear()+'-W'+String(Math.ceil((((u-ys)/86400000)+1)/7)).padStart(2,'0');}
-function showToast(msg,type){var t=document.getElementById('toast');t.textContent=msg;t.className='toast '+(type||'success');setTimeout(function(){t.className='toast hidden';},3500);}
+
+async function deletePlan(id) {
+  if (!confirm('Eliminar este plan?')) return;
+  await _db.from('training_plans').delete().eq('id',id);
+  loadPlans(); showToast('Plan eliminado','success');
+}
+
+// ---- PROFILE ----
+async function loadProfile() {
+  if (!currentUser) return;
+  var { data } = await _db.from('user_profile').select('*').eq('user_id',currentUser.id).limit(1).single();
+  var nameEl = document.getElementById('user-name-display');
+  if (nameEl && data) nameEl.textContent = data.nombre || 'Usuario';
+}
+
+async function loadProfilePage() {
+  if (!currentUser) return;
+  var { data: p } = await _db.from('user_profile').select('*').eq('user_id',currentUser.id).limit(1).single();
+  if (p) {
+    var nameEl=document.getElementById('profile-name');
+    if(nameEl) nameEl.textContent=p.nombre||'Sebastian Vinueza';
+    var edad = new Date().getFullYear() - new Date(p.fecha_nacimiento).getFullYear();
+    var ageEl=document.getElementById('p-age'); if(ageEl) ageEl.textContent=edad+' anos';
+    var wtEl=document.getElementById('p-weight'); if(wtEl) wtEl.textContent=p.peso_kg+' kg';
+    var htEl=document.getElementById('p-height'); if(htEl) htEl.textContent=(p.estatura_cm/100).toFixed(2)+' m';
+    var bmi=p.peso_kg/Math.pow(p.estatura_cm/100,2);
+    var bmiEl=document.getElementById('p-bmi'); if(bmiEl) bmiEl.textContent=bmi.toFixed(1);
+    var mhrEl=document.getElementById('p-maxhr'); if(mhrEl) mhrEl.textContent=(220-edad)+' bpm';
+    var rhrEl=document.getElementById('p-resthr'); if(rhrEl) rhrEl.textContent=(p.frecuencia_cardiaca_reposo||60)+' bpm';
+  }
+}
+
+function connectGarmin() { showToast('Integracion Garmin disponible proximamente!','success'); }
+
+// ---- MODALS ----
+function closeModal(id) { var el=document.getElementById(id); if(el) el.classList.add('hidden'); }
+
+// ---- UTILS ----
+function sportIcon(type) {
+  var icons = {running:'🏃',cycling:'🚴',swimming:'🏊',hiking:'🥾',walking:'🚶',strength:'💪',yoga:'🧘',triathlon:'🏅'};
+  return icons[type] || '⚡';
+}
+
+function formatDuration(seconds, compact) {
+  if (!seconds || seconds <= 0) return '--';
+  var s = Math.round(Number(seconds));
+  var h=Math.floor(s/3600), m=Math.floor((s%3600)/60), sec=s%60;
+  if (compact) return h>0 ? h+'h '+m+'m' : m+'m';
+  return h>0 ? h+':'+String(m).padStart(2,'0')+':'+String(sec).padStart(2,'0') : String(m).padStart(2,'0')+':'+String(sec).padStart(2,'0');
+}
+
+function formatDate(iso) {
+  if (!iso) return '--';
+  return new Date(iso).toLocaleDateString('es-ES',{day:'2-digit',month:'short',year:'numeric'});
+}
+
+function formatPace(secsPerKm) {
+  if (!secsPerKm) return '--';
+  var m=Math.floor(secsPerKm/60), s=Math.round(secsPerKm%60);
+  return m+':'+String(s).padStart(2,'0');
+}
+
+function getWeekKey(date) {
+  var d=new Date(Date.UTC(date.getFullYear(),date.getMonth(),date.getDate()));
+  var dayNum=d.getUTCDay()||7;
+  d.setUTCDate(d.getUTCDate()+4-dayNum);
+  var yearStart=new Date(Date.UTC(d.getUTCFullYear(),0,1));
+  return d.getUTCFullYear()+'-W'+String(Math.ceil((((d-yearStart)/86400000)+1)/7)).padStart(2,'0');
+}
+
+function showToast(msg, type) {
+  var toast=document.getElementById('toast');
+  if (!toast) return;
+  toast.textContent=msg;
+  toast.className='toast '+(type||'success');
+  setTimeout(function(){ toast.className='toast hidden'; },3500);
+}
