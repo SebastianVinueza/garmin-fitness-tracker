@@ -141,15 +141,15 @@ function showPage(page) {
 
 async function loadDashboard() {
   if (!currentUser) return;
-  var r = await _db.from('activities').select('*').eq('user_id', currentUser.id).order('fecha', { ascending: false });
+  var r = await _db.from('activities').select('*').eq('user_id', currentUser.id).order('fecha_inicio', { ascending: false });
   var acts = r.data || [];
   var totalDist = 0, totalCal = 0, totalSecs = 0, totalHR = 0, hrCount = 0;
   acts.forEach(function(a) {
-    totalDist += parseFloat(a.distancia_km) || 0;
+    totalDist += (parseFloat(a.distancia_metros) / 1000) || 0;
     totalCal += parseInt(a.calorias) || 0;
     totalSecs += parseInt(a.duracion_segundos) || 0;
-    if (a.frecuencia_cardiaca_media && parseInt(a.frecuencia_cardiaca_media) > 0) {
-      totalHR += parseInt(a.frecuencia_cardiaca_media);
+    if (a.frecuencia_cardiaca_promedio && parseInt(a.frecuencia_cardiaca_promedio) > 0) {
+      totalHR += parseInt(a.frecuencia_cardiaca_promedio);
       hrCount++;
     }
   });
@@ -177,11 +177,11 @@ async function loadDashboard() {
         '<div class="activity-sport-icon">' + sc.icon + '</div>' +
         '<div style="flex:1"><div class="activity-name">' + (a.nombre || 'Actividad') + '</div>' +
         '<div class="activity-meta"><span class="sport-badge" style="background:' + sc.color + '22;color:' + sc.color + '">' + sc.label + '</span>' +
-        '<span>' + formatDate(a.fecha) + '</span></div></div>' +
+        '<span>' + formatDate(a.fecha_inicio) + '</span></div></div>' +
         '<div class="activity-stats">' +
-        (a.distancia_km ? '<span class="stat-pill">' + parseFloat(a.distancia_km).toFixed(1) + ' km</span>' : '') +
+        (a.distancia_metros ? '<span class="stat-pill">' + (parseFloat(a.distancia_metros) / 1000).toFixed(1) + ' km</span>' : '') +
         '<span class="stat-pill">' + formatDuration(a.duracion_segundos) + '</span>' +
-        (a.frecuencia_cardiaca_media ? '<span class="stat-pill heart">❤ ' + a.frecuencia_cardiaca_media + '</span>' : '') +
+        (a.frecuencia_cardiaca_promedio ? '<span class="stat-pill heart">❤ ' + a.frecuencia_cardiaca_promedio + '</span>' : '') +
         '</div></div>';
     }).join('') : '<div class="empty-state"><span class="empty-icon">🏃</span><p>Sin actividades aun</p></div>';
   }
@@ -193,8 +193,8 @@ function renderWeeklyChart(acts) {
   if (charts.weekly) { charts.weekly.destroy(); }
   var weeks = {};
   acts.forEach(function(a) {
-    if (!a.fecha) return;
-    var k = getWeekKey(new Date(a.fecha));
+    if (!a.fecha_inicio) return;
+    var k = getWeekKey(new Date(a.fecha_inicio));
     weeks[k] = (weeks[k] || 0) + 1;
   });
   var keys = Object.keys(weeks).sort().slice(-8);
@@ -231,9 +231,9 @@ function renderProgressChart(acts) {
   if (charts.progress) { charts.progress.destroy(); }
   var months = {};
   acts.forEach(function(a) {
-    if (!a.fecha || !a.distancia_km) return;
-    var m = a.fecha.slice(0, 7);
-    months[m] = (months[m] || 0) + parseFloat(a.distancia_km);
+    if (!a.fecha_inicio || !a.distancia_metros) return;
+    var m = a.fecha_inicio.slice(0, 7);
+    months[m] = (months[m] || 0) + (parseFloat(a.distancia_metros) / 1000);
   });
   var keys = Object.keys(months).sort().slice(-6);
   var monthNames = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
@@ -255,10 +255,10 @@ async function loadActivities() {
   var sport = (document.getElementById('filter-sport') || {}).value || '';
   var from = (document.getElementById('filter-date-from') || {}).value || '';
   var to = (document.getElementById('filter-date-to') || {}).value || '';
-  var q = _db.from('activities').select('*').eq('user_id', currentUser.id).order('fecha', { ascending: false });
+  var q = _db.from('activities').select('*').eq('user_id', currentUser.id).order('fecha_inicio', { ascending: false });
   if (sport) q = q.eq('tipo_actividad', sport);
-  if (from) q = q.gte('fecha', from);
-  if (to) q = q.lte('fecha', to);
+  if (from) q = q.gte('fecha_inicio', from);
+  if (to) q = q.lte('fecha_inicio', to);
   var r = await q;
   var acts = r.data || [];
   if (!acts.length) {
@@ -267,10 +267,10 @@ async function loadActivities() {
   }
   list.innerHTML = acts.map(function(a) {
     var sc = getSportConfig(a.tipo_actividad);
-    var dist = parseFloat(a.distancia_km) || 0;
+    var dist = (parseFloat(a.distancia_metros) / 1000) || 0;
     var dur = parseInt(a.duracion_segundos) || 0;
     var cal = parseInt(a.calorias) || 0;
-    var hr = parseInt(a.frecuencia_cardiaca_media) || 0;
+    var hr = parseInt(a.frecuencia_cardiaca_promedio) || 0;
     var pace = '';
     if (sc.unit === 'pace' && dist > 0 && dur > 0) pace = formatPace(dur / dist);
     else if (sc.unit === 'speed' && dist > 0 && dur > 0) pace = (dist / (dur / 3600)).toFixed(1) + ' km/h';
@@ -282,7 +282,7 @@ async function loadActivities() {
       '<div class="act-title">' + (a.nombre || 'Actividad') + '</div>' +
       '<div class="act-subtitle">' +
       '<span class="sport-pill" style="background:' + sc.color + '22;color:' + sc.color + '">' + sc.label + '</span>' +
-      '<span>' + formatDate(a.fecha) + '</span>' +
+      '<span>' + formatDate(a.fecha_inicio) + '</span>' +
       '</div></div>' +
       '<div class="act-card-actions">' +
       '<button class="btn-ver" onclick="openDetail(' + idStr + ')">Ver</button>' +
@@ -315,11 +315,11 @@ async function showActivityDetail(id) {
   }
   var a = r.data;
   var sc = getSportConfig(a.tipo_actividad);
-  var dist = parseFloat(a.distancia_km) || 0;
+  var dist = (parseFloat(a.distancia_metros) / 1000) || 0;
   var dur = parseInt(a.duracion_segundos) || 0;
   var cal = parseInt(a.calorias) || 0;
-  var hr = parseInt(a.frecuencia_cardiaca_media) || 0;
-  var hrMax = parseInt(a.frecuencia_cardiaca_maxima) || 0;
+  var hr = parseInt(a.frecuencia_cardiaca_promedio) || 0;
+  var hrMax = parseInt(null) || 0;
   var elev = parseFloat(a.elevacion_ganada_m) || 0;
   var pace = '';
   if (sc.unit === 'pace' && dist > 0 && dur > 0) pace = formatPace(dur / dist) + '/km';
@@ -353,7 +353,7 @@ async function showActivityDetail(id) {
     '<div class="detail-sport-icon" style="background:' + sc.color + '22">' + sc.icon + '</div>' +
     '<div class="detail-title-block"><h2>' + (a.nombre || 'Actividad') + '</h2>' +
     '<div class="detail-meta"><span style="background:' + sc.color + '22;color:' + sc.color + ';padding:2px 10px;border-radius:20px;font-size:0.8rem">' + sc.label + '</span>' +
-    '<span>' + formatDate(a.fecha) + '</span></div></div></div>' +
+    '<span>' + formatDate(a.fecha_inicio) + '</span></div></div></div>' +
     '<div class="detail-main-stats">' +
     '<div class="detail-stat-block"><div class="dsb-val">' + (dist > 0 ? dist.toFixed(2) + ' km' : '--') + '</div><div class="dsb-lbl">Distancia</div></div>' +
     '<div class="detail-stat-block"><div class="dsb-val">' + (dur > 0 ? formatDuration(dur) : '--') + '</div><div class="dsb-lbl">Tiempo</div></div>' +
@@ -393,8 +393,8 @@ async function deleteActivityFromDetail(id) {
 }
 
 function calcVO2Max(a) {
-  var hr = parseInt(a.frecuencia_cardiaca_media) || 0;
-  var dist = parseFloat(a.distancia_km) || 0;
+  var hr = parseInt(a.frecuencia_cardiaca_promedio) || 0;
+  var dist = (parseFloat(a.distancia_metros) / 1000) || 0;
   var dur = parseInt(a.duracion_segundos) || 0;
   if (hr < 60 || dist < 0.5 || dur < 60) return null;
   var speed = dist / (dur / 3600);
@@ -405,7 +405,7 @@ function calcVO2Max(a) {
 
 function calcTSS(a) {
   var dur = parseInt(a.duracion_segundos) || 0;
-  var hr = parseInt(a.frecuencia_cardiaca_media) || 0;
+  var hr = parseInt(a.frecuencia_cardiaca_promedio) || 0;
   if (!dur || !hr) return 0;
   var hrMax = 182;
   var hrThresh = 162;
@@ -417,7 +417,7 @@ function calcTSS(a) {
 function calcCTL(acts) {
   if (!acts || !acts.length) return 0;
   var ctl = 0;
-  var sorted = acts.slice().sort(function(a, b) { return new Date(a.fecha) - new Date(b.fecha); });
+  var sorted = acts.slice().sort(function(a, b) { return new Date(a.fecha_inicio) - new Date(b.fecha_inicio); });
   sorted.forEach(function(a) {
     var tss = calcTSS(a);
     ctl = ctl + (tss - ctl) / 42;
@@ -428,7 +428,7 @@ function calcCTL(acts) {
 function calcATL(acts) {
   if (!acts || !acts.length) return 0;
   var atl = 0;
-  var sorted = acts.slice().sort(function(a, b) { return new Date(a.fecha) - new Date(b.fecha); });
+  var sorted = acts.slice().sort(function(a, b) { return new Date(a.fecha_inicio) - new Date(b.fecha_inicio); });
   sorted.forEach(function(a) {
     var tss = calcTSS(a);
     atl = atl + (tss - atl) / 7;
@@ -437,8 +437,8 @@ function calcATL(acts) {
 }
 
 function calcAerobicEfficiency(a) {
-  var hr = parseInt(a.frecuencia_cardiaca_media) || 0;
-  var dist = parseFloat(a.distancia_km) || 0;
+  var hr = parseInt(a.frecuencia_cardiaca_promedio) || 0;
+  var dist = (parseFloat(a.distancia_metros) / 1000) || 0;
   var dur = parseInt(a.duracion_segundos) || 0;
   if (!hr || !dist || !dur) return 0;
   var speed = dist / (dur / 60);
@@ -452,22 +452,22 @@ function calcRecoveryTime(a) {
 }
 
 function calcIntensityFactor(a) {
-  var hr = parseInt(a.frecuencia_cardiaca_media) || 0;
+  var hr = parseInt(a.frecuencia_cardiaca_promedio) || 0;
   var hrThresh = 162;
   if (!hr) return 0;
   return parseFloat((hr / hrThresh).toFixed(2));
 }
 
 function calcHRDrift(a) {
-  var hr = parseInt(a.frecuencia_cardiaca_media) || 0;
-  var hrMax = parseInt(a.frecuencia_cardiaca_maxima) || 0;
+  var hr = parseInt(a.frecuencia_cardiaca_promedio) || 0;
+  var hrMax = parseInt(null) || 0;
   if (!hr || !hrMax) return 0;
   return parseFloat(((hrMax - hr) / hr * 100).toFixed(1));
 }
 
 function buildHRZonesDetail(a) {
-  var hr = parseInt(a.frecuencia_cardiaca_media) || 0;
-  var hrMax = parseInt(a.frecuencia_cardiaca_maxima) || 0;
+  var hr = parseInt(a.frecuencia_cardiaca_promedio) || 0;
+  var hrMax = parseInt(null) || 0;
   var dur = parseInt(a.duracion_segundos) || 0;
   var mhr = 182;
   var zones = [
@@ -545,8 +545,8 @@ function buildCyclingProjections(dist, dur) {
 
 function generateAIAdvice(a) {
   var tips = [];
-  var hr = parseInt(a.frecuencia_cardiaca_media) || 0;
-  var dist = parseFloat(a.distancia_km) || 0;
+  var hr = parseInt(a.frecuencia_cardiaca_promedio) || 0;
+  var dist = (parseFloat(a.distancia_metros) / 1000) || 0;
   var dur = parseInt(a.duracion_segundos) || 0;
   var hrPct = hr > 0 ? hr / 182 : 0;
   var sport = a.tipo_actividad || 'other';
@@ -658,18 +658,15 @@ async function uploadActivity() {
       user_id: currentUser.id,
       nombre: name,
       tipo_actividad: actType,
-      fecha: parsed.date || new Date().toISOString().split('T')[0],
+      fecha_inicio: parsed.date || new Date().toISOString().split('T')[0],
       duracion_segundos: parsed.duration || 0,
-      distancia_km: parsed.distance || 0,
+      distancia_metros: Math.round((parsed.distance || 0) * 1000),
       calorias: parsed.calories || 0,
-      frecuencia_cardiaca_media: parsed.hrAvg || null,
-      frecuencia_cardiaca_maxima: parsed.hrMax || null,
-      elevacion_ganada_m: parsed.elevation || null,
-      velocidad_media_kmh: parsed.speed || null,
-      notas: notes || null,
-      rpe: parseInt(rpe) || 5,
-      raw_data: null
-    };
+      frecuencia_cardiaca_promedio: parsed.hrAvg || null,
+            elevacion_ganada_m: parsed.elevation || null,
+            notas: notes || null,
+      percepcion_esfuerzo: parseInt(rpe) || 5,
+          };
     var r = await _db.from('activities').insert([data]);
     if (r.error) throw new Error(r.error.message);
     setProgress(100, '✓ Actividad guardada!');
@@ -904,7 +901,7 @@ async function loadDailyMetrics() {
   var date = (document.getElementById('daily-date-picker') || {}).value || new Date().toISOString().split('T')[0];
   var setEl = function(id, v) { var el = document.getElementById(id); if (el) el.textContent = v !== null && v !== undefined ? v : '-'; };
   if (!currentUser) return;
-  var r = await _db.from('daily_metrics').select('*').eq('user_id', currentUser.id).eq('fecha', date).maybeSingle();
+  var r = await _db.from('daily_metrics').select('*').eq('user_id', currentUser.id).eq('fecha_inicio', date).maybeSingle();
   var d = r.data;
   setEl('d-steps', d && d.pasos ? d.pasos.toLocaleString() : '-');
   setEl('d-hr', d && d.fc_reposo ? d.fc_reposo + ' bpm' : '-');
@@ -923,9 +920,9 @@ async function renderWellnessChart(date) {
   if (charts.wellness) { charts.wellness.destroy(); }
   var end = new Date(date);
   var start = new Date(end); start.setDate(start.getDate() - 6);
-  var r = await _db.from('daily_metrics').select('fecha,fc_reposo,body_battery,pasos').eq('user_id', currentUser.id).gte('fecha', start.toISOString().split('T')[0]).lte('fecha', date).order('fecha', { ascending: true });
+  var r = await _db.from('daily_metrics').select('fecha,fc_reposo,body_battery,pasos').eq('user_id', currentUser.id).gte('fecha_inicio', start.toISOString().split('T')[0]).lte('fecha_inicio', date).order('fecha_inicio', { ascending: true });
   var data = r.data || [];
-  var labels = data.map(function(d) { return d.fecha.slice(5); });
+  var labels = data.map(function(d) { return d.fecha_inicio.slice(5); });
   var hrData = data.map(function(d) { return d.fc_reposo || null; });
   var battData = data.map(function(d) { return d.body_battery || null; });
   charts.wellness = new Chart(ctx, {
@@ -945,12 +942,12 @@ async function loadRecords() {
   if (!currentUser) return;
   var r = await _db.from('activities').select('*').eq('user_id', currentUser.id);
   var acts = r.data || [];
-  var runActs = acts.filter(function(a) { return a.tipo_actividad === 'running' && parseFloat(a.distancia_km) > 0 && parseInt(a.duracion_segundos) > 0; });
+  var runActs = acts.filter(function(a) { return a.tipo_actividad === 'running' && (parseFloat(a.distancia_metros) / 1000) > 0 && parseInt(a.duracion_segundos) > 0; });
   var setRec = function(id, val) { var el = document.getElementById(id); if (el) el.textContent = val; };
   var findPR = function(targetDist) {
     var best = null;
     runActs.forEach(function(a) {
-      var dist = parseFloat(a.distancia_km);
+      var dist = (parseFloat(a.distancia_metros) / 1000);
       var dur = parseInt(a.duracion_segundos);
       if (dist >= targetDist) {
         var projTime = dur * (targetDist / dist);
@@ -964,11 +961,11 @@ async function loadRecords() {
   setRec('pr-half', findPR(21.097));
   setRec('pr-full', findPR(42.195));
   var longestAct = acts.reduce(function(best, a) {
-    return parseFloat(a.distancia_km) > parseFloat(best.distancia_km || 0) ? a : best;
+    return (parseFloat(a.distancia_metros) / 1000) > parseFloat((best.distancia_metros || 0) / 1000) ? a : best;
   }, {});
-  setRec('pr-longest', longestAct.distancia_km ? parseFloat(longestAct.distancia_km).toFixed(1) + ' km' : '-- km');
+  setRec('pr-longest', longestAct.distancia_metros ? parseFloat(longestAct.distancia_metros).toFixed(1) + ' km' : '-- km');
   var maxSpeed = acts.reduce(function(m, a) {
-    var s = parseFloat(a.velocidad_media_kmh) || 0;
+    var s = parseFloat(null) || 0;
     return s > m ? s : m;
   }, 0);
   setRec('pr-speed', maxSpeed > 0 ? maxSpeed.toFixed(1) + ' km/h' : '-- km/h');
